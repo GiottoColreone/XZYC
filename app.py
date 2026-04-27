@@ -23,7 +23,6 @@ def setup_chinese_fonts():
     font_path = "SimHei.ttf"
     if not os.path.exists(font_path):
         try:
-            # 自动下载中文字体到云端服务器，防止图表变成方块
             urllib.request.urlretrieve("https://raw.githubusercontent.com/dolbydu/font/master/simhei.ttf", font_path)
         except Exception:
             pass
@@ -149,20 +148,21 @@ if start_btn:
         st.warning("⚠️ 权限阻断：请先在左侧上传两个必须的数据文件！")
     else:
         st.markdown("### 💻 系统核心演算终端")
-        terminal = st.empty()
         
-        # 核心修改：动态终端瀑布流刷屏引擎
+        # 使用固定高度容器，内容超出会自动出现滚动条
+        terminal_container = st.container(height=350)
+        terminal = terminal_container.empty()
+        
         log_lines = []
         def log_to_terminal(message):
-            """将新日志追加到末尾，产生换行往上顶的黑客刷屏效果"""
+            """将新日志追加到末尾，保留全部历史记录，方便往上拉看内容"""
             timestamp = pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]
             log_lines.append(f"[{timestamp}] {message}")
-            if len(log_lines) > 20:  # 保持屏幕显示最近的 20 行，产生瀑布流滚动感
-                log_lines.pop(0)
+            # 不再删除历史记录，配合外层容器自然形成滚动条
             terminal.code("\n".join(log_lines), language="bash")
 
         log_to_terminal("[SYSTEM] 正在初始化天眼稽查引擎...")
-        time.sleep(0.5)
+        time.sleep(0.2)
         
         log_to_terminal("[DATA] 正在挂载底层数据卷...")
         biz = pd.read_excel(file_biz) if file_biz.name.endswith('.xlsx') else pd.read_csv(file_biz)
@@ -189,34 +189,28 @@ if start_btn:
         total_shops = len(df_all)
         
         log_to_terminal("[GRAPH] 高危法人关系拓扑图谱构建完毕。")
-        time.sleep(0.3)
         log_to_terminal("[AI_CORE] 准备注入全量目标进入神经网络...")
         
-        step_scan = max(1, total_shops // 20)
+        step_scan = max(1, total_shops // 15)
         for i in range(1, total_shops + 1, step_scan):
             log_to_terminal(f"[SCANNING] 正在深度穿透商铺网络，当前排查节点: {i} / {total_shops}...")
-            time.sleep(0.08)
+            time.sleep(0.05)
 
         log_to_terminal(f"[SCANNING] 节点穿透完毕，共计锁定 {total_shops} 个计算目标。")
-        time.sleep(0.3)
         
         # 3. NLP向量化日志刷屏
         log_to_terminal("[NLP] 正在启动 TF-IDF 引擎，提取潜在语义特征...")
-        time.sleep(0.3)
         log_to_terminal("[NLP] 挂载自定义分词器 (Custom Tokenizer) 与归一化词典...")
         
         vec_name = TfidfVectorizer(tokenizer=custom_tokenizer, max_features=1000)
         vec_scope = TfidfVectorizer(tokenizer=custom_tokenizer, max_features=1500)
         
-        time.sleep(0.2)
         log_to_terminal("[NLP] 正在对 [公司名称] 执行高维空间映射 (Max Features: 1000)...")
         X_name = vec_name.fit_transform(df_all['公司名称'])
         
-        time.sleep(0.2)
         log_to_terminal("[NLP] 正在对 [经营范围] 执行高维空间映射 (Max Features: 1500)...")
         X_scope = vec_scope.fit_transform(df_all['经营范围'])
         
-        time.sleep(0.2)
         log_to_terminal("[NLP] 过滤通用停用词与拦截烟草类干扰词成功。")
         log_to_terminal("[DATA] 启动 MinMaxScaler 压缩信用值极值偏倚...")
         
@@ -226,79 +220,94 @@ if start_btn:
         y_combined = df_all['label'].values
 
         log_to_terminal(f"[ML] 特征融合完毕。稀疏矩阵维度构建成功: {X_combined.shape}")
-        time.sleep(0.4)
 
         # 4. 模型训练日志刷屏
         log_to_terminal("[ML] 核心引擎接管：初始化随机森林决策集群 (RandomForest)...")
-        time.sleep(0.2)
-        log_to_terminal("[ML] 配置参数 -> n_estimators: 200 | max_depth: 20 | class_weight: balanced")
-        time.sleep(0.2)
         log_to_terminal("[ML] 正在唤醒 CPU 多线程并行计算 (n_jobs=-1)...")
         
         for tree_batch in range(1, 6):
             log_to_terminal(f"[ML-CORE] 正在生成决策树簇 [{tree_batch*40}/200]... 计算节点基尼杂质 (Gini Impurity)...")
-            time.sleep(0.15)
+            time.sleep(0.1)
             
         log_to_terminal("[ML-CORE] 正在执行最大深度剪枝与叶子节点收敛...")
-        time.sleep(0.2)
         
         ml_model = RandomForestClassifier(n_estimators=200, max_depth=20, class_weight='balanced', random_state=42, n_jobs=-1)
         ml_model.fit(X_combined, y_combined)
         
         log_to_terminal("[ML] 200 个独立决策算法联合编译完成！")
-        time.sleep(0.2)
         log_to_terminal("[PREDICT] 正在向目标商户广播预测任务，提取嫌疑概率...")
         
         all_probs = ml_model.predict_proba(X_combined)[:, 1]
         df_all['无证户综合概率(%)'] = np.round(all_probs * 100, 2)
         target_pool = df_all[df_all['label'] == 0].copy()
         
-        # 5. 【概率溯源白盒算法及动态刷屏】
+        # 5. 【极限加速版：稀疏矩阵底层指针溯源】
         log_to_terminal("[EXPLAINER] 正在激活白盒解释器 (White-box Explainer)...")
-        time.sleep(0.3)
-        log_to_terminal("[EXPLAINER] 提取全局特征重要性矩阵 (Feature Importances Matrix)...")
+        log_to_terminal("[EXPLAINER] 提取全局特征重要性矩阵...")
         
         feature_names = np.array(vec_name.get_feature_names_out().tolist() + vec_scope.get_feature_names_out().tolist() + ['信用异常惩罚', '历史无证前科'])
         importances = ml_model.feature_importances_
-        X_target = X_combined.tocsr()[target_pool.index.tolist()]
-        weighted_X = X_target.multiply(importances) 
         
-        time.sleep(0.2)
-        log_to_terminal("[EXPLAINER] 正在反推目标商户的概率溯源路径...")
+        X_target = X_combined.tocsr()[target_pool.index.tolist()]
+        # 核心优化点：转为 CSR 格式并直接使用底层 numpy 数组运算
+        weighted_X = X_target.multiply(importances).tocsr() 
+        
+        indptr = weighted_X.indptr
+        indices = weighted_X.indices
+        data = weighted_X.data
         
         explanations = []
         total_targets = weighted_X.shape[0]
-        step_expl = max(1, total_targets // 15)
+        step_expl = max(1, total_targets // 10)
+        
+        log_to_terminal("[EXPLAINER] 启动底层指针寻址，正在极速反推目标溯源路径...")
         
         for i in range(total_targets):
-            if i % step_expl == 0 and i > 0:
-                log_to_terminal(f"[EXPLAINER] 已解析溯源路径: {i} / {total_targets} 个节点...")
-                time.sleep(0.04)
+            if i > 0 and i % step_expl == 0:
+                log_to_terminal(f"[EXPLAINER] 已极速解析溯源路径: {i} / {total_targets} 个节点...")
                 
-            row_weights = weighted_X.getrow(i).toarray()[0]
-            top_indices = row_weights.argsort()[-3:][::-1] 
-            total_weight = row_weights.sum()
+            start = indptr[i]
+            end = indptr[i+1]
             final_prob = target_pool.iloc[i]['无证户综合概率(%)']
             
-            if total_weight > 0:
-                expl_parts = []
-                sum_top_pct = 0
-                for idx in top_indices:
-                    if row_weights[idx] > 0:
-                        rel_pct = (row_weights[idx] / total_weight) * final_prob
-                        sum_top_pct += rel_pct
-                        feat_name = feature_names[idx]
-                        expl_parts.append(f"{feat_name}({rel_pct:.1f}%)")
-                remaining = final_prob - sum_top_pct
-                if remaining > 0.5: expl_parts.append(f"其他综合({remaining:.1f}%)")
-                explanation = " + ".join(expl_parts)
+            if start < end:
+                row_data = data[start:end]
+                row_indices = indices[start:end]
+                total_weight = np.sum(row_data)
+                
+                if total_weight > 0:
+                    # 极速版获取 Top 3 特征
+                    k = min(3, len(row_data))
+                    if k < len(row_data):
+                        top_k_idx = np.argpartition(row_data, -k)[-k:]
+                        top_k_idx = top_k_idx[np.argsort(row_data[top_k_idx])][::-1]
+                    else:
+                        top_k_idx = np.argsort(row_data)[::-1]
+                        
+                    top_indices_local = row_indices[top_k_idx]
+                    top_weights_local = row_data[top_k_idx]
+                    
+                    expl_parts = []
+                    sum_top_pct = 0
+                    for idx, weight in zip(top_indices_local, top_weights_local):
+                        if weight > 0:
+                            rel_pct = (weight / total_weight) * final_prob
+                            sum_top_pct += rel_pct
+                            expl_parts.append(f"{feature_names[idx]}({rel_pct:.1f}%)")
+                            
+                    remaining = final_prob - sum_top_pct
+                    if remaining > 0.5:
+                        expl_parts.append(f"其他综合({remaining:.1f}%)")
+                    explanation = " + ".join(expl_parts)
+                else:
+                    explanation = "无显著高危特征"
             else:
                 explanation = "无显著高危特征"
+                
             explanations.append(explanation)
             
         target_pool['AI 判定依据'] = explanations
-        log_to_terminal("[EXPLAINER] 溯源解析完成！已为所有高危商户生成违规证据链。")
-        time.sleep(0.3)
+        log_to_terminal("[EXPLAINER] 溯源解析瞬间完成！已为所有高危商户生成违规证据链。")
 
         # 6. 分级与排序
         def assign_risk(prob):
@@ -311,7 +320,6 @@ if start_btn:
         target_pool = target_pool.sort_values(by='无证户综合概率(%)', ascending=False)
         
         log_to_terminal("[SYSTEM] ✅ 演算闭环结束！系统正在生成终端高危打击清单与数据大屏...")
-        time.sleep(0.5)
         
         # ==========================================
         # 结果展示区
