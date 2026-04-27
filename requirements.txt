@@ -5,3 +5,5 @@ jieba
 scikit-learn
 openpyxl
 xlsxwriter
+matplotlib
+seaborn
