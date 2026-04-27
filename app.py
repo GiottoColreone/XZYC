@@ -33,7 +33,6 @@ def get_chinese_font():
         title_font = fm.FontProperties(fname=font_path, size=11, weight='bold')
         label_font = fm.FontProperties(fname=font_path, size=9)
     else:
-        # 如果下载失败的备用方案
         title_font = fm.FontProperties(size=11, weight='bold')
         label_font = fm.FontProperties(size=9)
         
@@ -53,7 +52,7 @@ def custom_tokenizer(text):
     return processed_words
 
 # ==========================================
-# 1. 图表生成函数 (解决文字重叠版)
+# 1. 图表生成函数 (解决文字重叠与隐藏乱码)
 # ==========================================
 def draw_analysis_charts(df, t_font, l_font):
     st.markdown("### 📊 AI 模型全盘数据可视化分析")
@@ -61,8 +60,9 @@ def draw_analysis_charts(df, t_font, l_font):
     level_order = ['低风险', '中风险', '高风险', '极高风险']
     
     st.markdown("#### 一、 无证户概率综合分析")
-    fig1, axes1 = plt.subplots(2, 3, figsize=(12, 7))
-    fig1.subplots_adjust(hspace=0.4, wspace=0.3)
+    fig1, axes1 = plt.subplots(2, 3, figsize=(13, 7.5)) # 稍微加大总画布
+    # 【核心修复】：增大 wspace 横向间距，彻底防止饼图图例插进旁边的图表中
+    fig1.subplots_adjust(hspace=0.4, wspace=0.6) 
     
     # 1. 直方图
     for level in level_order:
@@ -74,11 +74,12 @@ def draw_analysis_charts(df, t_font, l_font):
     axes1[0, 0].set_ylabel('商户数量', fontproperties=l_font)
     axes1[0, 0].legend(prop=l_font)
 
-    # 2. 饼图 (修复重叠：去掉直标文字，使用图例，隐藏微小扇区数字)
+    # 2. 饼图
     risk_counts = df['风险等级'].value_counts().reindex(level_order).fillna(0)
     axes1[0, 1].pie(risk_counts, labels=None, autopct=lambda p: f'{p:.1f}%' if p > 3 else '', colors=[color_map[l] for l in risk_counts.index], startangle=90, textprops={'fontproperties': l_font})
     axes1[0, 1].set_title('所有商户风险等级分布', fontproperties=t_font)
-    axes1[0, 1].legend(risk_counts.index, prop=l_font, loc="center left", bbox_to_anchor=(0.9, 0.5))
+    # 【核心修复】：将图例推到饼图外面，防止重叠
+    axes1[0, 1].legend(risk_counts.index, prop=l_font, loc="center left", bbox_to_anchor=(1.05, 0.5)) 
 
     # 3. 密度图
     import seaborn as sns
@@ -86,8 +87,12 @@ def draw_analysis_charts(df, t_font, l_font):
     axes1[0, 2].set_title('信用值密度分布', fontproperties=t_font)
     axes1[0, 2].set_xlabel('信用值', fontproperties=l_font)
     axes1[0, 2].set_ylabel('密度', fontproperties=l_font)
+    
+    # 【核心修复】：专门抓取 seaborn 隐藏生成的“风险等级”标题，强制灌入中文字体
     legend = axes1[0, 2].get_legend()
-    if legend: plt.setp(legend.texts, fontproperties=l_font)
+    if legend: 
+        plt.setp(legend.texts, fontproperties=l_font)
+        legend.set_title("风险等级", prop=l_font) 
 
     # 4. 柱状图
     avg_prob = df.groupby('风险等级')['无证户综合概率(%)'].mean().reindex(level_order)
@@ -108,19 +113,19 @@ def draw_analysis_charts(df, t_font, l_font):
     axes1[1, 1].set_ylabel('无证户概率(%)', fontproperties=l_font)
     axes1[1, 1].legend(prop=l_font)
 
-    # 6. 法人饼图 (修复重叠：去掉直标文字，使用图例，隐藏微小扇区数字)
+    # 6. 法人饼图
     high_risk_reps = df[df['高危法人关联'] == 1].shape[0]
     rep_data = [high_risk_reps, df.shape[0] - high_risk_reps]
     rep_labels = ['历史高危法人', '普通法人']
     axes1[1, 2].pie(rep_data, labels=None, autopct=lambda p: f'{p:.1f}%' if p > 3 else '', colors=['#FF6B6B', '#4ECDC4'], startangle=140, textprops={'fontproperties': l_font})
     axes1[1, 2].set_title('法人身份识别比例', fontproperties=t_font)
-    axes1[1, 2].legend(rep_labels, prop=l_font, loc="center left", bbox_to_anchor=(0.9, 0.5))
+    axes1[1, 2].legend(rep_labels, prop=l_font, loc="center left", bbox_to_anchor=(1.05, 0.5))
     
     st.pyplot(fig1)
 
     st.markdown("#### 二、 风险等级详细分析")
-    fig2, axes2 = plt.subplots(2, 3, figsize=(12, 7))
-    fig2.subplots_adjust(hspace=0.4, wspace=0.3)
+    fig2, axes2 = plt.subplots(2, 3, figsize=(13, 7.5))
+    fig2.subplots_adjust(hspace=0.4, wspace=0.6)
 
     # 7. 柱状图2
     bars = axes2[0, 0].bar(risk_counts.index, risk_counts.values, color=[color_map[l] for l in risk_counts.index])
@@ -192,19 +197,27 @@ if start_btn:
     else:
         st.markdown("### 💻 系统核心演算终端")
         
-        # 核心修复 1：利用官方 container 强行锁死日志高度，不再霸占全屏
-        log_container = st.container(height=300)
-        terminal = log_container.empty()
+        terminal = st.empty()
         log_lines = []
         
         def log_to_terminal(message):
-            """核心修复 2：最新日志永远在第 1 行插入，配合固定高度，彻底解决追踪问题"""
+            """
+            核心修复：原生白框 + 自动吸附底部的智能日志。
+            恢复从上往下输出日志顺序。并利用 JS 强行将滚动条拉到最底部。
+            """
             timestamp = pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]
-            log_lines.insert(0, f"[{timestamp}] {message}")
+            log_lines.append(f"[{timestamp}] {message}")
+            log_text = "\n".join(log_lines)
             
-            # 使用官方白色底色的代码块包裹
-            display_text = "▼ 实时终端日志 [最新指令始终在最上方显示，向下滚动可查阅历史]\n" + "="*55 + "\n" + "\n".join(log_lines)
-            terminal.code(display_text, language="bash")
+            # 使用原生白色浅灰风格背景，结合一段 JS 控制滚动条永远吸附在最下面
+            html_code = f"""
+            <div id="terminal_box" style="height: 300px; overflow-y: auto; background-color: #F0F2F6; border-radius: 8px; padding: 15px; font-family: Consolas, 'Courier New', monospace; font-size: 14px; color: #000000; white-space: pre-wrap; border: 1px solid #D0D4DC;">{log_text}</div>
+            <script>
+                var d = document.getElementById("terminal_box");
+                if(d) d.scrollTop = d.scrollHeight;
+            </script>
+            """
+            terminal.markdown(html_code, unsafe_allow_html=True)
 
         log_to_terminal("[SYSTEM] 正在初始化天眼稽查引擎...")
         time.sleep(0.3)
