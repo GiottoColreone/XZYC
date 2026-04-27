@@ -53,7 +53,7 @@ def custom_tokenizer(text):
     return processed_words
 
 # ==========================================
-# 1. 图表生成函数 (100% 解决乱码版)
+# 1. 图表生成函数 (解决文字重叠版)
 # ==========================================
 def draw_analysis_charts(df, t_font, l_font):
     st.markdown("### 📊 AI 模型全盘数据可视化分析")
@@ -74,10 +74,11 @@ def draw_analysis_charts(df, t_font, l_font):
     axes1[0, 0].set_ylabel('商户数量', fontproperties=l_font)
     axes1[0, 0].legend(prop=l_font)
 
-    # 2. 饼图
+    # 2. 饼图 (修复重叠：去掉直标文字，使用图例，隐藏微小扇区数字)
     risk_counts = df['风险等级'].value_counts().reindex(level_order).fillna(0)
-    axes1[0, 1].pie(risk_counts, labels=risk_counts.index, autopct='%1.1f%%', colors=[color_map[l] for l in risk_counts.index], startangle=90, textprops={'fontproperties': l_font})
+    axes1[0, 1].pie(risk_counts, labels=None, autopct=lambda p: f'{p:.1f}%' if p > 3 else '', colors=[color_map[l] for l in risk_counts.index], startangle=90, textprops={'fontproperties': l_font})
     axes1[0, 1].set_title('所有商户风险等级分布', fontproperties=t_font)
+    axes1[0, 1].legend(risk_counts.index, prop=l_font, loc="center left", bbox_to_anchor=(0.9, 0.5))
 
     # 3. 密度图
     import seaborn as sns
@@ -107,10 +108,14 @@ def draw_analysis_charts(df, t_font, l_font):
     axes1[1, 1].set_ylabel('无证户概率(%)', fontproperties=l_font)
     axes1[1, 1].legend(prop=l_font)
 
-    # 6. 法人饼图
+    # 6. 法人饼图 (修复重叠：去掉直标文字，使用图例，隐藏微小扇区数字)
     high_risk_reps = df[df['高危法人关联'] == 1].shape[0]
-    axes1[1, 2].pie([high_risk_reps, df.shape[0] - high_risk_reps], labels=['历史高危法人', '普通法人'], autopct='%1.1f%%', colors=['#FF6B6B', '#4ECDC4'], startangle=140, textprops={'fontproperties': l_font})
+    rep_data = [high_risk_reps, df.shape[0] - high_risk_reps]
+    rep_labels = ['历史高危法人', '普通法人']
+    axes1[1, 2].pie(rep_data, labels=None, autopct=lambda p: f'{p:.1f}%' if p > 3 else '', colors=['#FF6B6B', '#4ECDC4'], startangle=140, textprops={'fontproperties': l_font})
     axes1[1, 2].set_title('法人身份识别比例', fontproperties=t_font)
+    axes1[1, 2].legend(rep_labels, prop=l_font, loc="center left", bbox_to_anchor=(0.9, 0.5))
+    
     st.pyplot(fig1)
 
     st.markdown("#### 二、 风险等级详细分析")
@@ -187,17 +192,18 @@ if start_btn:
     else:
         st.markdown("### 💻 系统核心演算终端")
         
-        terminal = st.empty()
+        # 核心修复 1：利用官方 container 强行锁死日志高度，不再霸占全屏
+        log_container = st.container(height=300)
+        terminal = log_container.empty()
         log_lines = []
         
         def log_to_terminal(message):
-            """原生倒序输出机制：恢复白色文本框，并将最新日志置于最顶端，根治滚动难题"""
+            """核心修复 2：最新日志永远在第 1 行插入，配合固定高度，彻底解决追踪问题"""
             timestamp = pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]
-            # 新日志插入到列表的第 0 个位置（最上方）
             log_lines.insert(0, f"[{timestamp}] {message}")
             
-            # 使用 Streamlit 原生的 st.code 样式（跟随网页主题，默认白色底色）
-            display_text = "▼ 实时终端日志 [最新指令始终在最上方显示]\n" + "="*50 + "\n" + "\n".join(log_lines)
+            # 使用官方白色底色的代码块包裹
+            display_text = "▼ 实时终端日志 [最新指令始终在最上方显示，向下滚动可查阅历史]\n" + "="*55 + "\n" + "\n".join(log_lines)
             terminal.code(display_text, language="bash")
 
         log_to_terminal("[SYSTEM] 正在初始化天眼稽查引擎...")
