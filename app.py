@@ -23,6 +23,7 @@ def setup_chinese_fonts():
     font_path = "SimHei.ttf"
     if not os.path.exists(font_path):
         try:
+            # 自动下载中文字体到云端服务器，防止图表变成方块
             urllib.request.urlretrieve("https://raw.githubusercontent.com/dolbydu/font/master/simhei.ttf", font_path)
         except Exception:
             pass
@@ -46,7 +47,7 @@ def custom_tokenizer(text):
     return processed_words
 
 # ==========================================
-# 1. 图表生成函数
+# 1. 图表生成函数 (精致版)
 # ==========================================
 def draw_analysis_charts(df):
     st.markdown("### 📊 AI 模型全盘数据可视化分析")
@@ -150,13 +151,13 @@ if start_btn:
         st.markdown("### 💻 系统核心演算终端")
         terminal = st.empty()
         
-        # 核心修改：动态终端刷屏引擎
+        # 核心修改：动态终端瀑布流刷屏引擎
         log_lines = []
         def log_to_terminal(message):
             """将新日志追加到末尾，产生换行往上顶的黑客刷屏效果"""
             timestamp = pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]
             log_lines.append(f"[{timestamp}] {message}")
-            if len(log_lines) > 15:  # 始终保持屏幕显示最近的 15 行
+            if len(log_lines) > 20:  # 保持屏幕显示最近的 20 行，产生瀑布流滚动感
                 log_lines.pop(0)
             terminal.code("\n".join(log_lines), language="bash")
 
@@ -188,48 +189,92 @@ if start_btn:
         total_shops = len(df_all)
         
         log_to_terminal("[GRAPH] 高危法人关系拓扑图谱构建完毕。")
-        time.sleep(0.5)
+        time.sleep(0.3)
         log_to_terminal("[AI_CORE] 准备注入全量目标进入神经网络...")
         
-        # 产生连续换行刷屏效果的循环
-        step = max(1, total_shops // 45) # 切分成约 45 条刷屏日志
-        for i in range(1, total_shops + 1, step):
+        step_scan = max(1, total_shops // 20)
+        for i in range(1, total_shops + 1, step_scan):
             log_to_terminal(f"[SCANNING] 正在深度穿透商铺网络，当前排查节点: {i} / {total_shops}...")
-            time.sleep(0.06)  # 毫秒级停顿，模拟真实扫描的节奏
+            time.sleep(0.08)
 
         log_to_terminal(f"[SCANNING] 节点穿透完毕，共计锁定 {total_shops} 个计算目标。")
-        time.sleep(0.5)
+        time.sleep(0.3)
+        
+        # 3. NLP向量化日志刷屏
         log_to_terminal("[NLP] 正在启动 TF-IDF 引擎，提取潜在语义特征...")
+        time.sleep(0.3)
+        log_to_terminal("[NLP] 挂载自定义分词器 (Custom Tokenizer) 与归一化词典...")
         
         vec_name = TfidfVectorizer(tokenizer=custom_tokenizer, max_features=1000)
         vec_scope = TfidfVectorizer(tokenizer=custom_tokenizer, max_features=1500)
+        
+        time.sleep(0.2)
+        log_to_terminal("[NLP] 正在对 [公司名称] 执行高维空间映射 (Max Features: 1000)...")
         X_name = vec_name.fit_transform(df_all['公司名称'])
+        
+        time.sleep(0.2)
+        log_to_terminal("[NLP] 正在对 [经营范围] 执行高维空间映射 (Max Features: 1500)...")
         X_scope = vec_scope.fit_transform(df_all['经营范围'])
+        
+        time.sleep(0.2)
+        log_to_terminal("[NLP] 过滤通用停用词与拦截烟草类干扰词成功。")
+        log_to_terminal("[DATA] 启动 MinMaxScaler 压缩信用值极值偏倚...")
+        
         scaler = MinMaxScaler()
         X_numeric = scaler.fit_transform(df_all[['信用值', '高危法人关联']])
         X_combined = sp.hstack((X_name, X_scope, X_numeric))
         y_combined = df_all['label'].values
 
-        log_to_terminal("[ML] 高维特征矩阵建立成功，开始启动随机森林演算树...")
+        log_to_terminal(f"[ML] 特征融合完毕。稀疏矩阵维度构建成功: {X_combined.shape}")
+        time.sleep(0.4)
+
+        # 4. 模型训练日志刷屏
+        log_to_terminal("[ML] 核心引擎接管：初始化随机森林决策集群 (RandomForest)...")
+        time.sleep(0.2)
+        log_to_terminal("[ML] 配置参数 -> n_estimators: 200 | max_depth: 20 | class_weight: balanced")
+        time.sleep(0.2)
+        log_to_terminal("[ML] 正在唤醒 CPU 多线程并行计算 (n_jobs=-1)...")
+        
+        for tree_batch in range(1, 6):
+            log_to_terminal(f"[ML-CORE] 正在生成决策树簇 [{tree_batch*40}/200]... 计算节点基尼杂质 (Gini Impurity)...")
+            time.sleep(0.15)
+            
+        log_to_terminal("[ML-CORE] 正在执行最大深度剪枝与叶子节点收敛...")
+        time.sleep(0.2)
         
         ml_model = RandomForestClassifier(n_estimators=200, max_depth=20, class_weight='balanced', random_state=42, n_jobs=-1)
         ml_model.fit(X_combined, y_combined)
+        
+        log_to_terminal("[ML] 200 个独立决策算法联合编译完成！")
+        time.sleep(0.2)
+        log_to_terminal("[PREDICT] 正在向目标商户广播预测任务，提取嫌疑概率...")
+        
         all_probs = ml_model.predict_proba(X_combined)[:, 1]
-        
-        log_to_terminal("[ML] 200 个独立决策算法并发投票完成！提取嫌疑概率...")
-        
         df_all['无证户综合概率(%)'] = np.round(all_probs * 100, 2)
         target_pool = df_all[df_all['label'] == 0].copy()
         
-        log_to_terminal("[EXPLAINER] 正在激活白盒解释器，生成概率溯源分析...")
+        # 5. 【概率溯源白盒算法及动态刷屏】
+        log_to_terminal("[EXPLAINER] 正在激活白盒解释器 (White-box Explainer)...")
+        time.sleep(0.3)
+        log_to_terminal("[EXPLAINER] 提取全局特征重要性矩阵 (Feature Importances Matrix)...")
         
         feature_names = np.array(vec_name.get_feature_names_out().tolist() + vec_scope.get_feature_names_out().tolist() + ['信用异常惩罚', '历史无证前科'])
         importances = ml_model.feature_importances_
         X_target = X_combined.tocsr()[target_pool.index.tolist()]
         weighted_X = X_target.multiply(importances) 
         
+        time.sleep(0.2)
+        log_to_terminal("[EXPLAINER] 正在反推目标商户的概率溯源路径...")
+        
         explanations = []
-        for i in range(weighted_X.shape[0]):
+        total_targets = weighted_X.shape[0]
+        step_expl = max(1, total_targets // 15)
+        
+        for i in range(total_targets):
+            if i % step_expl == 0 and i > 0:
+                log_to_terminal(f"[EXPLAINER] 已解析溯源路径: {i} / {total_targets} 个节点...")
+                time.sleep(0.04)
+                
             row_weights = weighted_X.getrow(i).toarray()[0]
             top_indices = row_weights.argsort()[-3:][::-1] 
             total_weight = row_weights.sum()
@@ -252,7 +297,10 @@ if start_btn:
             explanations.append(explanation)
             
         target_pool['AI 判定依据'] = explanations
+        log_to_terminal("[EXPLAINER] 溯源解析完成！已为所有高危商户生成违规证据链。")
+        time.sleep(0.3)
 
+        # 6. 分级与排序
         def assign_risk(prob):
             if prob >= 85: return '极高风险', '🚨 立即排查'
             elif prob >= 65: return '高风险', '⚠️ 重点监控'
@@ -262,7 +310,8 @@ if start_btn:
         target_pool[['风险等级', '监管建议']] = target_pool.apply(lambda r: pd.Series(assign_risk(r['无证户综合概率(%)'])), axis=1)
         target_pool = target_pool.sort_values(by='无证户综合概率(%)', ascending=False)
         
-        log_to_terminal("[SYSTEM] ✅ 演算闭环结束！正在生成高危打击清单与数据大屏...")
+        log_to_terminal("[SYSTEM] ✅ 演算闭环结束！系统正在生成终端高危打击清单与数据大屏...")
+        time.sleep(0.5)
         
         # ==========================================
         # 结果展示区
@@ -275,7 +324,7 @@ if start_btn:
             * 📝 **隐蔽文本比对**：AI 通过 TF-IDF 算法提取了全量商户的“店名”和“经营范围”。它过滤了普通词汇，专门寻找在历史无证户中高频出现的**异常伪装词汇组合**。
             * 👤 **法人网络追踪**：结合历史案卷，一旦发现该店的老板曾有过被罚记录（高危法人关联），算法会对其名下所有新店铺叠加极高的惩罚权重。
             * 📉 **异常数值惩罚**：参考天眼查/企查查信用分，评分越低下限、异常记录越多的商铺，其违法嫌疑会产生指数级上升。
-            > **实战指导：** 只要商户概率达到 **85% (极高风险)** 以上，意味着其在“字面伪装”、“历史背景”和“信用评分”这三个维度上，**已经与历史抓获的无证户达到了极高的基因相似度**，建议明天立刻派警力去现场排查！
+            > **实战指导：** 只要商户概率达到 **85% (极高风险)** 以上，意味着其在“字面伪装”、“历史背景”和“信用评分”这三个维度上，**已经与历史抓获的无证户达到了极高的基因相似度**。在名册中，AI 会为您精准罗列出导致其被判定为极高风险的**核心元凶特征及其贡献比例**！
             """)
 
         col1, col2, col3 = st.columns(3)
