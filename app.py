@@ -14,32 +14,27 @@ import io
 import time
 
 # ==========================================
-# 0. 网页基本设置
+# 0. 网页基本设置与【字体乱码终极修复】
 # ==========================================
 st.set_page_config(page_title="无证户智能稽查天眼", page_icon="👁️", layout="wide")
 
-# 下载并直接获取字体文件路径（放弃全局配置，改用直接注入）
 @st.cache_resource
-def get_chinese_font():
+def setup_chinese_fonts():
     font_path = "SimHei.ttf"
     if not os.path.exists(font_path):
         try:
-            # 使用更稳定的 github raw 镜像下载黑体
-            urllib.request.urlretrieve("https://raw.githubusercontent.com/StellarCN/scp_zh/master/fonts/SimHei.ttf", font_path)
+            # 自动下载中文字体到云端服务器，防止图表变成方块
+            urllib.request.urlretrieve("https://raw.githubusercontent.com/dolbydu/font/master/simhei.ttf", font_path)
         except Exception:
             pass
-    
     if os.path.exists(font_path):
-        title_font = fm.FontProperties(fname=font_path, size=11, weight='bold')
-        label_font = fm.FontProperties(fname=font_path, size=9)
+        fm.fontManager.addfont(font_path)
+        plt.rcParams['font.family'] = 'SimHei'
     else:
-        title_font = fm.FontProperties(size=11, weight='bold')
-        label_font = fm.FontProperties(size=9)
-        
+        plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS', 'sans-serif']
     plt.rcParams['axes.unicode_minus'] = False
-    return title_font, label_font
 
-title_font, label_font = get_chinese_font()
+setup_chinese_fonts()
 
 CUSTOM_STOP_WORDS = {'有限','责任','分公司','集团','控股','股份','有限公司','徐州','地址','未知','公司', '店铺'}
 TOBACCO_WORDS = {'烟草制品零售','卷烟零售','雪茄零售','烟丝零售','香烟销售','烟草销售','烟草','卷烟','雪茄','烟丝','香烟'}
@@ -52,131 +47,89 @@ def custom_tokenizer(text):
     return processed_words
 
 # ==========================================
-# 1. 图表生成函数 (解决文字重叠与隐藏乱码)
+# 1. 图表生成函数 (精致版)
 # ==========================================
-def draw_analysis_charts(df, t_font, l_font):
+def draw_analysis_charts(df):
     st.markdown("### 📊 AI 模型全盘数据可视化分析")
     color_map = {'低风险': '#32CD32', '中风险': '#FFD700', '高风险': '#FF6B00', '极高风险': '#FF0000'}
     level_order = ['低风险', '中风险', '高风险', '极高风险']
     
     st.markdown("#### 一、 无证户概率综合分析")
-    fig1, axes1 = plt.subplots(2, 3, figsize=(13, 7.5)) # 稍微加大总画布
-    # 【核心修复】：增大 wspace 横向间距，彻底防止饼图图例插进旁边的图表中
-    fig1.subplots_adjust(hspace=0.4, wspace=0.6) 
+    fig1, axes1 = plt.subplots(2, 3, figsize=(12, 7))
+    fig1.subplots_adjust(hspace=0.4, wspace=0.3)
     
-    # 1. 直方图
     for level in level_order:
         subset = df[df['风险等级'] == level]
         if not subset.empty:
             axes1[0, 0].hist(subset['无证户综合概率(%)'], bins=15, color=color_map[level], alpha=0.7, label=level, edgecolor='black')
-    axes1[0, 0].set_title('所有商户无证户概率分布', fontproperties=t_font)
-    axes1[0, 0].set_xlabel('无证户概率(%)', fontproperties=l_font)
-    axes1[0, 0].set_ylabel('商户数量', fontproperties=l_font)
-    axes1[0, 0].legend(prop=l_font)
+    axes1[0, 0].set_title('所有商户无证户概率分布', fontsize=10)
+    axes1[0, 0].legend(fontsize=8)
 
-    # 2. 饼图
     risk_counts = df['风险等级'].value_counts().reindex(level_order).fillna(0)
-    axes1[0, 1].pie(risk_counts, labels=None, autopct=lambda p: f'{p:.1f}%' if p > 3 else '', colors=[color_map[l] for l in risk_counts.index], startangle=90, textprops={'fontproperties': l_font})
-    axes1[0, 1].set_title('所有商户风险等级分布', fontproperties=t_font)
-    # 【核心修复】：将图例推到饼图外面，防止重叠
-    axes1[0, 1].legend(risk_counts.index, prop=l_font, loc="center left", bbox_to_anchor=(1.05, 0.5)) 
+    axes1[0, 1].pie(risk_counts, labels=risk_counts.index, autopct='%1.1f%%', colors=[color_map[l] for l in risk_counts.index], startangle=90, textprops={'fontsize': 8})
+    axes1[0, 1].set_title('所有商户风险等级分布', fontsize=10)
 
-    # 3. 密度图
     import seaborn as sns
     sns.kdeplot(data=df, x='信用值', hue='风险等级', palette=color_map, ax=axes1[0, 2], fill=True, common_norm=False)
-    axes1[0, 2].set_title('信用值密度分布', fontproperties=t_font)
-    axes1[0, 2].set_xlabel('信用值', fontproperties=l_font)
-    axes1[0, 2].set_ylabel('密度', fontproperties=l_font)
-    
-    # 【核心修复】：专门抓取 seaborn 隐藏生成的“风险等级”标题，强制灌入中文字体
-    legend = axes1[0, 2].get_legend()
-    if legend: 
-        plt.setp(legend.texts, fontproperties=l_font)
-        legend.set_title("风险等级", prop=l_font) 
+    axes1[0, 2].set_title('信用值密度分布', fontsize=10)
 
-    # 4. 柱状图
     avg_prob = df.groupby('风险等级')['无证户综合概率(%)'].mean().reindex(level_order)
     bars = axes1[1, 0].bar(avg_prob.index, avg_prob.values, color=[color_map[l] for l in avg_prob.index])
-    axes1[1, 0].set_title('各等级平均概率', fontproperties=t_font)
-    axes1[1, 0].set_xticks(range(len(avg_prob.index)))
-    axes1[1, 0].set_xticklabels(avg_prob.index, fontproperties=l_font)
+    axes1[1, 0].set_title('各等级平均概率', fontsize=10)
     for bar in bars:
-        axes1[1, 0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, f'{bar.get_height():.1f}%', ha='center', va='bottom', fontproperties=l_font)
+        axes1[1, 0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, f'{bar.get_height():.1f}%', ha='center', va='bottom', fontsize=8)
 
-    # 5. 散点图
     for level in level_order:
         subset = df[df['风险等级'] == level]
         if not subset.empty:
             axes1[1, 1].scatter(subset['信用值'], subset['无证户综合概率(%)'], color=color_map[level], label=level, alpha=0.6, s=15)
-    axes1[1, 1].set_title('信用值 vs 概率散点', fontproperties=t_font)
-    axes1[1, 1].set_xlabel('信用值', fontproperties=l_font)
-    axes1[1, 1].set_ylabel('无证户概率(%)', fontproperties=l_font)
-    axes1[1, 1].legend(prop=l_font)
+    axes1[1, 1].set_title('信用值 vs 概率散点', fontsize=10)
 
-    # 6. 法人饼图
     high_risk_reps = df[df['高危法人关联'] == 1].shape[0]
-    rep_data = [high_risk_reps, df.shape[0] - high_risk_reps]
-    rep_labels = ['历史高危法人', '普通法人']
-    axes1[1, 2].pie(rep_data, labels=None, autopct=lambda p: f'{p:.1f}%' if p > 3 else '', colors=['#FF6B6B', '#4ECDC4'], startangle=140, textprops={'fontproperties': l_font})
-    axes1[1, 2].set_title('法人身份识别比例', fontproperties=t_font)
-    axes1[1, 2].legend(rep_labels, prop=l_font, loc="center left", bbox_to_anchor=(1.05, 0.5))
-    
+    axes1[1, 2].pie([high_risk_reps, df.shape[0] - high_risk_reps], labels=['历史高危法人', '普通法人'], autopct='%1.1f%%', colors=['#FF6B6B', '#4ECDC4'], startangle=140, textprops={'fontsize': 8})
+    axes1[1, 2].set_title('法人身份识别比例', fontsize=10)
     st.pyplot(fig1)
 
     st.markdown("#### 二、 风险等级详细分析")
-    fig2, axes2 = plt.subplots(2, 3, figsize=(13, 7.5))
-    fig2.subplots_adjust(hspace=0.4, wspace=0.6)
+    fig2, axes2 = plt.subplots(2, 3, figsize=(12, 7))
+    fig2.subplots_adjust(hspace=0.4, wspace=0.3)
 
-    # 7. 柱状图2
     bars = axes2[0, 0].bar(risk_counts.index, risk_counts.values, color=[color_map[l] for l in risk_counts.index])
-    axes2[0, 0].set_title('商户数量分布', fontproperties=t_font)
-    axes2[0, 0].set_xticks(range(len(risk_counts.index)))
-    axes2[0, 0].set_xticklabels(risk_counts.index, fontproperties=l_font)
-    for bar in bars: 
-        axes2[0, 0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, f'{int(bar.get_height())}', ha='center', va='bottom', fontproperties=l_font)
+    axes2[0, 0].set_title('商户数量分布', fontsize=10)
+    for bar in bars: axes2[0, 0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, f'{int(bar.get_height())}', ha='center', va='bottom', fontsize=8)
 
-    # 8. 箱线图1
     box_data = [df[df['风险等级'] == level]['无证户综合概率(%)'].dropna() for level in level_order]
     bplot = axes2[0, 1].boxplot(box_data, labels=level_order, patch_artist=True)
     for patch, color in zip(bplot['boxes'], [color_map[l] for l in level_order]):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
-    axes2[0, 1].set_title('各等级概率分布(箱线图)', fontproperties=t_font)
-    axes2[0, 1].set_xticklabels(level_order, fontproperties=l_font)
+    axes2[0, 1].set_title('各等级概率分布(箱线图)', fontsize=10)
+    axes2[0, 1].tick_params(axis='x', labelsize=8)
 
-    # 9. 箱线图2
     box_data_score = [df[df['风险等级'] == level]['信用值'].dropna() for level in level_order]
     bplot_score = axes2[0, 2].boxplot(box_data_score, labels=level_order, patch_artist=True)
     for patch, color in zip(bplot_score['boxes'], [color_map[l] for l in level_order]):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
-    axes2[0, 2].set_title('信用值分布(箱线图)', fontproperties=t_font)
-    axes2[0, 2].set_xticklabels(level_order, fontproperties=l_font)
+    axes2[0, 2].set_title('信用值分布(箱线图)', fontsize=10)
+    axes2[0, 2].tick_params(axis='x', labelsize=8)
 
-    # 10. 折线图
     sorted_probs = np.sort(df['无证户综合概率(%)'])
     cumulative = np.arange(1, len(sorted_probs) + 1) / len(sorted_probs) * 100
     axes2[1, 0].plot(sorted_probs, cumulative, 'b-', linewidth=2)
-    axes2[1, 0].set_title('概率累积分布', fontproperties=t_font)
-    axes2[1, 0].set_xlabel('无证户概率(%)', fontproperties=l_font)
-    axes2[1, 0].set_ylabel('累积百分比(%)', fontproperties=l_font)
+    axes2[1, 0].set_title('概率累积分布', fontsize=10)
 
-    # 11. 柱状图3
     avg_score = df.groupby('风险等级')['信用值'].mean().reindex(level_order)
     bars = axes2[1, 1].bar(avg_score.index, avg_score.values, color=[color_map[l] for l in avg_score.index])
-    axes2[1, 1].set_title('平均信用值', fontproperties=t_font)
-    axes2[1, 1].set_xticks(range(len(avg_score.index)))
-    axes2[1, 1].set_xticklabels(avg_score.index, fontproperties=l_font)
-    for bar in bars: 
-        axes2[1, 1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontproperties=l_font)
+    axes2[1, 1].set_title('平均信用值', fontsize=10)
+    for bar in bars: axes2[1, 1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{bar.get_height():.1f}', ha='center', va='bottom', fontsize=8)
 
-    # 12. 文字快照
     axes2[1, 2].axis('off')
-    axes2[1, 2].set_title('极高风险目标快照', fontproperties=t_font)
+    axes2[1, 2].set_title('极高风险目标快照', weight='bold', fontsize=10)
     y_pos = 0.9
     for idx, row in df.head(8).reset_index().iterrows():
         name = str(row['公司名称'])[:10] + "..." if len(str(row['公司名称'])) > 10 else row['公司名称']
-        axes2[1, 2].text(0.0, y_pos, f"{idx+1}. {name} ({row['无证户综合概率(%)']}%)", fontproperties=l_font, color='red' if idx < 3 else 'black')
+        axes2[1, 2].text(0.0, y_pos, f"{idx+1}. {name} ({row['无证户综合概率(%)']}%)", fontsize=9, color='red' if idx < 3 else 'black')
         y_pos -= 0.12
     st.pyplot(fig2)
 
@@ -196,183 +149,158 @@ if start_btn:
         st.warning("⚠️ 权限阻断：请先在左侧上传两个必须的数据文件！")
     else:
         st.markdown("### 💻 系统核心演算终端")
-        
         terminal = st.empty()
-        log_lines = []
         
+        # 核心修改：动态终端瀑布流刷屏引擎
+        log_lines = []
         def log_to_terminal(message):
-            """
-            核心修复：原生白框 + 自动吸附底部的智能日志。
-            恢复从上往下输出日志顺序。并利用 JS 强行将滚动条拉到最底部。
-            """
+            """将新日志追加到末尾，产生换行往上顶的黑客刷屏效果"""
             timestamp = pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]
             log_lines.append(f"[{timestamp}] {message}")
-            log_text = "\n".join(log_lines)
-            
-            # 使用原生白色浅灰风格背景，结合一段 JS 控制滚动条永远吸附在最下面
-            html_code = f"""
-            <div id="terminal_box" style="height: 300px; overflow-y: auto; background-color: #F0F2F6; border-radius: 8px; padding: 15px; font-family: Consolas, 'Courier New', monospace; font-size: 14px; color: #000000; white-space: pre-wrap; border: 1px solid #D0D4DC;">{log_text}</div>
-            <script>
-                var d = document.getElementById("terminal_box");
-                if(d) d.scrollTop = d.scrollHeight;
-            </script>
-            """
-            terminal.markdown(html_code, unsafe_allow_html=True)
+            if len(log_lines) > 20:  # 保持屏幕显示最近的 20 行，产生瀑布流滚动感
+                log_lines.pop(0)
+            terminal.code("\n".join(log_lines), language="bash")
 
         log_to_terminal("[SYSTEM] 正在初始化天眼稽查引擎...")
-        time.sleep(0.3)
-        log_to_terminal("[SYSTEM] 分配核心内存空间，启动沙盒隔离环境...")
-        time.sleep(0.2)
+        time.sleep(0.5)
         
-        log_to_terminal("[DATA] 正在挂载底层数据卷，请求读取文件流...")
+        log_to_terminal("[DATA] 正在挂载底层数据卷...")
         biz = pd.read_excel(file_biz) if file_biz.name.endswith('.xlsx') else pd.read_csv(file_biz)
         unl = pd.read_excel(file_unl) if file_unl.name.endswith('.xlsx') else pd.read_csv(file_unl)
-        log_to_terminal(f"[DATA] 数据加载完毕。检索到营业执照 {len(biz)} 条，卷宗数据 {len(unl)} 条。")
-        time.sleep(0.3)
         
-        log_to_terminal("[CLEAN] 启动数据清洗管线，进行字段对齐与缺失值探测...")
         if '天眼评分' in biz.columns: biz.rename(columns={'天眼评分': '信用值'}, inplace=True)
         if '天眼评分' in unl.columns: unl.rename(columns={'天眼评分': '信用值'}, inplace=True)
         overlap_cols = [col for col in biz.columns if '重合' in col]
-        
-        time.sleep(0.2)
         if overlap_cols: 
-            log_to_terminal(f"[CLEAN] 发现预置重合标识列 [{overlap_cols[0]}]，正在执行交集过滤...")
             biz = biz[~biz[overlap_cols[0]].isin(['是', '1', 1, True, 'TRUE', 'true'])]
-            log_to_terminal("[CLEAN] 成功剔除已知重合数据，有效防止目标泄露。")
+            log_to_terminal("[CLEAN] 成功剔除已知重合数据，防止目标泄露。")
 
-        log_to_terminal("[CLEAN] 填充缺失特征向量，交叉比对统一社会信用代码去重...")
         fill_dict = {'公司名称':'未知', '法定代表人':'未知', '注册地址':'未知', '经营范围':'未知', '信用值':0, '统一社会信用代码':'未知'}
         biz = biz.fillna(fill_dict).drop_duplicates(subset=['统一社会信用代码'], keep='first')
         unl = unl.fillna(fill_dict).drop_duplicates(subset=['统一社会信用代码'], keep='first')
         biz['信用值'] = pd.to_numeric(biz['信用值'], errors='coerce').fillna(0)
         unl['信用值'] = pd.to_numeric(unl['信用值'], errors='coerce').fillna(0)
         
-        log_to_terminal("[GRAPH] 正在从历史无证档案中提取 [法定代表人] 核心实体...")
         bad_reps = set(unl[~unl['法定代表人'].isin(['未知', '', '无'])]['法定代表人'].unique())
-        log_to_terminal(f"[GRAPH] 成功提取 {len(bad_reps)} 个高危法人身份特征。")
-        time.sleep(0.3)
-        
-        log_to_terminal("[GRAPH] 正在构建图谱，执行跨表网络穿透比对，追溯名下关联店铺...")
         biz['高危法人关联'] = biz['法定代表人'].apply(lambda x: 1 if x in bad_reps else 0)
         unl['高危法人关联'] = 1
         biz['label'], unl['label'] = 0, 1
         df_all = pd.concat([unl, biz], ignore_index=True)
         total_shops = len(df_all)
-        log_to_terminal("[GRAPH] 高危法人关系拓扑图谱构建完毕，污染链条已全量标记。")
-        time.sleep(0.3)
         
+        log_to_terminal("[GRAPH] 高危法人关系拓扑图谱构建完毕。")
+        time.sleep(0.3)
         log_to_terminal("[AI_CORE] 准备注入全量目标进入神经网络...")
-        step_scan = max(1, total_shops // 15)
+        
+        step_scan = max(1, total_shops // 20)
         for i in range(1, total_shops + 1, step_scan):
             log_to_terminal(f"[SCANNING] 正在深度穿透商铺网络，当前排查节点: {i} / {total_shops}...")
-            time.sleep(0.05)
+            time.sleep(0.08)
+
         log_to_terminal(f"[SCANNING] 节点穿透完毕，共计锁定 {total_shops} 个计算目标。")
+        time.sleep(0.3)
         
+        # 3. NLP向量化日志刷屏
         log_to_terminal("[NLP] 正在启动 TF-IDF 引擎，提取潜在语义特征...")
+        time.sleep(0.3)
         log_to_terminal("[NLP] 挂载自定义分词器 (Custom Tokenizer) 与归一化词典...")
+        
         vec_name = TfidfVectorizer(tokenizer=custom_tokenizer, max_features=1000)
         vec_scope = TfidfVectorizer(tokenizer=custom_tokenizer, max_features=1500)
         
+        time.sleep(0.2)
         log_to_terminal("[NLP] 正在对 [公司名称] 执行高维空间映射 (Max Features: 1000)...")
         X_name = vec_name.fit_transform(df_all['公司名称'])
+        
+        time.sleep(0.2)
         log_to_terminal("[NLP] 正在对 [经营范围] 执行高维空间映射 (Max Features: 1500)...")
         X_scope = vec_scope.fit_transform(df_all['经营范围'])
         
+        time.sleep(0.2)
         log_to_terminal("[NLP] 过滤通用停用词与拦截烟草类干扰词成功。")
         log_to_terminal("[DATA] 启动 MinMaxScaler 压缩信用值极值偏倚...")
+        
         scaler = MinMaxScaler()
         X_numeric = scaler.fit_transform(df_all[['信用值', '高危法人关联']])
         X_combined = sp.hstack((X_name, X_scope, X_numeric))
         y_combined = df_all['label'].values
 
         log_to_terminal(f"[ML] 特征融合完毕。稀疏矩阵维度构建成功: {X_combined.shape}")
+        time.sleep(0.4)
 
+        # 4. 模型训练日志刷屏
         log_to_terminal("[ML] 核心引擎接管：初始化随机森林决策集群 (RandomForest)...")
+        time.sleep(0.2)
+        log_to_terminal("[ML] 配置参数 -> n_estimators: 200 | max_depth: 20 | class_weight: balanced")
+        time.sleep(0.2)
         log_to_terminal("[ML] 正在唤醒 CPU 多线程并行计算 (n_jobs=-1)...")
+        
         for tree_batch in range(1, 6):
             log_to_terminal(f"[ML-CORE] 正在生成决策树簇 [{tree_batch*40}/200]... 计算节点基尼杂质 (Gini Impurity)...")
-            time.sleep(0.1)
+            time.sleep(0.15)
+            
         log_to_terminal("[ML-CORE] 正在执行最大深度剪枝与叶子节点收敛...")
+        time.sleep(0.2)
         
         ml_model = RandomForestClassifier(n_estimators=200, max_depth=20, class_weight='balanced', random_state=42, n_jobs=-1)
         ml_model.fit(X_combined, y_combined)
         
         log_to_terminal("[ML] 200 个独立决策算法联合编译完成！")
+        time.sleep(0.2)
         log_to_terminal("[PREDICT] 正在向目标商户广播预测任务，提取嫌疑概率...")
+        
         all_probs = ml_model.predict_proba(X_combined)[:, 1]
         df_all['无证户综合概率(%)'] = np.round(all_probs * 100, 2)
         target_pool = df_all[df_all['label'] == 0].copy()
         
+        # 5. 【概率溯源白盒算法及动态刷屏】
         log_to_terminal("[EXPLAINER] 正在激活白盒解释器 (White-box Explainer)...")
-        log_to_terminal("[EXPLAINER] 提取全局特征重要性矩阵...")
+        time.sleep(0.3)
+        log_to_terminal("[EXPLAINER] 提取全局特征重要性矩阵 (Feature Importances Matrix)...")
         
         feature_names = np.array(vec_name.get_feature_names_out().tolist() + vec_scope.get_feature_names_out().tolist() + ['信用异常惩罚', '历史无证前科'])
         importances = ml_model.feature_importances_
         X_target = X_combined.tocsr()[target_pool.index.tolist()]
-        weighted_X = X_target.multiply(importances).tocsr() 
+        weighted_X = X_target.multiply(importances) 
         
-        indptr = weighted_X.indptr
-        indices = weighted_X.indices
-        data = weighted_X.data
+        time.sleep(0.2)
+        log_to_terminal("[EXPLAINER] 正在反推目标商户的概率溯源路径...")
         
         explanations = []
         total_targets = weighted_X.shape[0]
-        step_expl = max(1, total_targets // 10)
-        log_to_terminal("[EXPLAINER] 启动底层指针寻址，正在极速反推目标溯源路径...")
+        step_expl = max(1, total_targets // 15)
         
         for i in range(total_targets):
-            if i > 0 and i % step_expl == 0:
-                log_to_terminal(f"[EXPLAINER] 已极速解析溯源路径: {i} / {total_targets} 个节点...")
+            if i % step_expl == 0 and i > 0:
+                log_to_terminal(f"[EXPLAINER] 已解析溯源路径: {i} / {total_targets} 个节点...")
+                time.sleep(0.04)
                 
-            start = indptr[i]
-            end = indptr[i+1]
+            row_weights = weighted_X.getrow(i).toarray()[0]
+            top_indices = row_weights.argsort()[-3:][::-1] 
+            total_weight = row_weights.sum()
             final_prob = target_pool.iloc[i]['无证户综合概率(%)']
             
-            if start < end:
-                row_data = data[start:end]
-                row_indices = indices[start:end]
-                total_weight = np.sum(row_data)
-                
-                if total_weight > 0:
-                    k = min(3, len(row_data))
-                    if k < len(row_data):
-                        top_k_idx = np.argpartition(row_data, -k)[-k:]
-                        top_k_idx = top_k_idx[np.argsort(row_data[top_k_idx])][::-1]
-                    else:
-                        top_k_idx = np.argsort(row_data)[::-1]
-                        
-                    top_indices_local = row_indices[top_k_idx]
-                    top_weights_local = row_data[top_k_idx]
-                    
-                    expl_parts = []
-                    sum_top_pct = 0
-                    for idx, weight in zip(top_indices_local, top_weights_local):
-                        if weight > 0:
-                            rel_pct = (weight / total_weight) * final_prob
-                            sum_top_pct += rel_pct
-                            feat_name = feature_names[idx]
-                            
-                            if feat_name == '历史无证前科':
-                                rep_name = target_pool.iloc[i]['法定代表人']
-                                feat_name = f"关联高危前科法人[{rep_name}]"
-                                
-                            expl_parts.append(f"{feat_name}({rel_pct:.1f}%)")
-                            
-                    remaining = final_prob - sum_top_pct
-                    if remaining > 0.5:
-                        expl_parts.append(f"其他综合({remaining:.1f}%)")
-                    explanation = " + ".join(expl_parts)
-                else:
-                    explanation = "无显著高危特征"
+            if total_weight > 0:
+                expl_parts = []
+                sum_top_pct = 0
+                for idx in top_indices:
+                    if row_weights[idx] > 0:
+                        rel_pct = (row_weights[idx] / total_weight) * final_prob
+                        sum_top_pct += rel_pct
+                        feat_name = feature_names[idx]
+                        expl_parts.append(f"{feat_name}({rel_pct:.1f}%)")
+                remaining = final_prob - sum_top_pct
+                if remaining > 0.5: expl_parts.append(f"其他综合({remaining:.1f}%)")
+                explanation = " + ".join(expl_parts)
             else:
                 explanation = "无显著高危特征"
-                
             explanations.append(explanation)
             
         target_pool['AI 判定依据'] = explanations
-        log_to_terminal("[EXPLAINER] 溯源解析瞬间完成！已为所有高危商户生成违规证据链。")
+        log_to_terminal("[EXPLAINER] 溯源解析完成！已为所有高危商户生成违规证据链。")
+        time.sleep(0.3)
 
+        # 6. 分级与排序
         def assign_risk(prob):
             if prob >= 85: return '极高风险', '🚨 立即排查'
             elif prob >= 65: return '高风险', '⚠️ 重点监控'
@@ -383,28 +311,33 @@ if start_btn:
         target_pool = target_pool.sort_values(by='无证户综合概率(%)', ascending=False)
         
         log_to_terminal("[SYSTEM] ✅ 演算闭环结束！系统正在生成终端高危打击清单与数据大屏...")
+        time.sleep(0.5)
         
         # ==========================================
-        # 结果展示区 (布局重构：名单置顶)
+        # 结果展示区
         # ==========================================
         st.success("🎯 筛查任务完美收官！已生成结构化作战简报。")
         
+        with st.expander("💡 侦探大脑：AI 是如何计算出这个违规概率的？", expanded=True):
+            st.markdown("""
+            此处的 **“无证户综合概率(%)”** 并非简单的词汇叠加，而是由 **200 个独立的决策树算法（随机森林）** 联合投票计算得出的综合置信度：
+            * 📝 **隐蔽文本比对**：AI 通过 TF-IDF 算法提取了全量商户的“店名”和“经营范围”。它过滤了普通词汇，专门寻找在历史无证户中高频出现的**异常伪装词汇组合**。
+            * 👤 **法人网络追踪**：结合历史案卷，一旦发现该店的老板曾有过被罚记录（高危法人关联），算法会对其名下所有新店铺叠加极高的惩罚权重。
+            * 📉 **异常数值惩罚**：参考天眼查/企查查信用分，评分越低下限、异常记录越多的商铺，其违法嫌疑会产生指数级上升。
+            > **实战指导：** 只要商户概率达到 **85% (极高风险)** 以上，意味着其在“字面伪装”、“历史背景”和“信用评分”这三个维度上，**已经与历史抓获的无证户达到了极高的基因相似度**。在名册中，AI 会为您精准罗列出导致其被判定为极高风险的**核心元凶特征及其贡献比例**！
+            """)
+
         col1, col2, col3 = st.columns(3)
         col1.metric("极高风险目标锁定", f"{len(target_pool[target_pool['无证户综合概率(%)'] >= 85])} 家", "需立即行动")
         col2.metric("高危法人揪出", f"{target_pool['高危法人关联'].sum()} 人", "存在前科")
         col3.metric("总计排查商铺", f"{len(target_pool)} 家", "极速")
 
         st.divider()
+        draw_analysis_charts(target_pool)
+        
+        st.divider()
         st.subheader("🚨 极高风险打击首选名单 TOP 15 (附白盒释义)")
         
-        with st.expander("💡 侦探大脑：AI 判定的各项依据代表什么意思？", expanded=True):
-            st.markdown("""
-            实战指导：只要商户概率达到 **85% (极高风险)** 以上，建议优先派警力排查！在名册的【AI 判定依据】列中，AI 已精准罗列出嫌疑来源：
-            * 📝 **隐蔽文本伪装（如：百货(45%)）**：代表该店名称或经营范围使用了与历史无证户高度重合的伪装词汇。
-            * 👤 **历史前科穿透（如：关联高危前科法人[张三]）**：代表此店的老板“张三”，曾在历史卷宗中因为无证经营被抓过，具有极高的重操旧业嫌疑！
-            * 📉 **异常信用惩罚**：代表该商户在外部系统（如企查查）中的信用分极低或存在严重经营异常。
-            """)
-            
         display_cols = ['公司名称', '无证户综合概率(%)', 'AI 判定依据', '风险等级', '监管建议', '法定代表人', '注册地址', '信用值']
         st.dataframe(target_pool[display_cols].head(15), use_container_width=True)
 
@@ -412,6 +345,3 @@ if start_btn:
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             target_pool[display_cols].to_excel(writer, index=False)
         st.download_button(label="📥 一键导出完整作战排查名单 (Excel)", data=buffer, file_name="智能筛查白盒风险名单.xlsx", mime="application/vnd.ms-excel")
-
-        st.divider()
-        draw_analysis_charts(target_pool, title_font, label_font)
