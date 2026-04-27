@@ -13,7 +13,6 @@ import os
 import io
 import time
 
-
 # ==========================================
 # 0. 网页基本设置与【字体乱码终极修复】
 # ==========================================
@@ -258,4 +257,31 @@ if start_btn:
             else: return '低风险', '✅ 常规监管'
             
         target_pool[['风险等级', '监管建议']] = target_pool.apply(lambda r: pd.Series(assign_risk(r['无证户综合概率(%)'])), axis=1)
-        target_pool = target_pool.sort_values(
+        target_pool = target_pool.sort_values(by='无证户综合概率(%)', ascending=False)
+        
+        terminal.code(f"[系统进程] ✅ 演算闭环结束！正在生成高危打击清单与数据大屏...", language="bash")
+        
+        # ==========================================
+        # 结果展示区
+        # ==========================================
+        st.success("🎯 筛查任务完美收官！已生成结构化作战简报。")
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("极高风险目标锁定", f"{len(target_pool[target_pool['无证户综合概率(%)'] >= 85])} 家", "需立即行动")
+        col2.metric("高危法人揪出", f"{target_pool['高危法人关联'].sum()} 人", "存在前科")
+        col3.metric("总计排查商铺", f"{len(target_pool)} 家", "极速")
+
+        st.divider()
+        draw_analysis_charts(target_pool)
+        
+        st.divider()
+        st.subheader("🚨 极高风险打击首选名单 TOP 15 (附白盒释义)")
+        
+        # 重新排版展示列，把神仙级的"AI判定依据"放进去
+        display_cols = ['公司名称', '无证户综合概率(%)', 'AI 判定依据', '风险等级', '监管建议', '法定代表人', '注册地址', '信用值']
+        st.dataframe(target_pool[display_cols].head(15), use_container_width=True)
+
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            target_pool[display_cols].to_excel(writer, index=False)
+        st.download_button(label="📥 一键导出完整作战排查名单 (Excel)", data=buffer, file_name="智能筛查白盒风险名单.xlsx", mime="application/vnd.ms-excel")
