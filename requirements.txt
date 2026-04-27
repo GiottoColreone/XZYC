@@ -1,0 +1,7 @@
+streamlit
+pandas
+numpy
+jieba
+scikit-learn
+openpyxl
+xlsxwriter
