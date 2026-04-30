@@ -17,7 +17,7 @@ import time
 # ==========================================
 # 0. 基础环境配置
 # ==========================================
-st.set_page_config(page_title="无证户智能稽查天眼 V4 - 权重平衡满血版", page_icon="👁️", layout="wide")
+st.set_page_config(page_title="无证户智能稽查天眼", page_icon="👁️", layout="wide")
 
 @st.cache_resource
 def get_chinese_font():
@@ -152,7 +152,7 @@ def draw_analysis_charts(df, t_font, l_font):
 # ==========================================
 # 3. 主程序逻辑
 # ==========================================
-st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 (三权平衡版)")
+st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 ")
 
 with st.sidebar:
     st.header("📂 1. 数据接入库")
@@ -255,7 +255,7 @@ if start_btn:
         st.divider()
 
         # --- 风险解释示例 (公式化) ---
-        with st.expander("💡 了解 AI 白盒解释器如何计算风险？(权重各为1/3)", expanded=True):
+        with st.expander("💡 AI是如何计算风险的？", expanded=True):
             col_ex1, col_ex2 = st.columns([1, 2])
             with col_ex1:
                 st.markdown("""
