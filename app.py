@@ -8,7 +8,7 @@ import matplotlib.font_manager as fm
 import seaborn as sns
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.mixture import GaussianMixture # 【新增】引入高斯混合模型
+from sklearn.mixture import GaussianMixture
 import urllib.request
 import os
 import io
@@ -53,14 +53,13 @@ def custom_tokenizer(text):
     return processed_words
 
 # ==========================================
-# 2. 可视化模块 (12 张全量图表) - 保持不变
+# 2. 可视化模块 (12 张全量图表)
 # ==========================================
 def draw_analysis_charts(df, t_font, l_font):
     st.markdown("### 📊 AI 模型全盘数据可视化分析")
     color_map = {'低风险': '#32CD32', '中风险': '#FFD700', '高风险': '#FF6B00', '极高风险': '#FF0000'}
     level_order = ['低风险', '中风险', '高风险', '极高风险']
     
-    # 第一板块：概率分布分析
     st.markdown("#### 一、 无证户概率综合分析")
     fig1, axes1 = plt.subplots(2, 3, figsize=(15, 8))
     
@@ -99,7 +98,6 @@ def draw_analysis_charts(df, t_font, l_font):
     fig1.tight_layout(pad=3.0) 
     st.pyplot(fig1)
 
-    # 第二板块：详细统计分析
     st.markdown("#### 二、 风险等级详细分析")
     fig2, axes2 = plt.subplots(2, 3, figsize=(15, 8))
     
@@ -138,27 +136,40 @@ def draw_analysis_charts(df, t_font, l_font):
     fig2.tight_layout(pad=3.0)
     st.pyplot(fig2)
 
+
 # ==========================================
-# 3. 主程序逻辑
+# 3. 核心加载逻辑与主程序
 # ==========================================
 st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 (30-50-20加权版)")
 
 with st.sidebar:
     st.header("📂 1. 数据接入库")
-    # 【修改1】开启 accept_multiple_files=True
     file_biz_list = st.file_uploader("上传【营业执照】名单 (支持多选)", type=["xlsx", "csv"], accept_multiple_files=True)
     file_unl_list = st.file_uploader("上传【历史无证户】名单 (支持多选)", type=["xlsx", "csv"], accept_multiple_files=True)
     start_btn = st.button("🚀 2. 启动 AI 深度筛查演算", type="primary", use_container_width=True)
 
-# 辅助函数：处理多个上传文件的合并
+# 辅助函数：处理多个上传文件的合并与天眼查格式适配
 def load_uploaded_files(file_list):
     df_list = []
     for f in file_list:
         df = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
+        
+        # 【防御1】自动跳过天眼查第一行的免责声明
+        if '声明' in str(df.columns[0]) or '公司名称' not in df.columns:
+            f.seek(0)
+            df = pd.read_excel(f, header=1) if f.name.endswith('.xlsx') else pd.read_csv(f, header=1)
+        
+        # 【防御2】强制抓取物理最后一列重命名为信用值
+        if len(df.columns) > 0:
+            last_col_name = df.columns[-1]
+            df = df.rename(columns={last_col_name: '信用值'})
+            
         df_list.append(df)
+        
     if df_list:
         return pd.concat(df_list, ignore_index=True)
     return pd.DataFrame()
+
 
 if start_btn:
     if not file_biz_list or not file_unl_list:
@@ -178,18 +189,31 @@ if start_btn:
 
         start_time = time.time()
 
-        # --- 步骤 1: 初始化与数据加载 (支持多文件) ---
+        # --- 步骤 1: 初始化与数据加载 ---
         log_to_terminal("[SYSTEM] 正在初始化天眼稽查引擎...")
         log_to_terminal("[SYSTEM] 分配核心内存空间，执行多文件数据流合并...")
         biz = load_uploaded_files(file_biz_list)
         unl = load_uploaded_files(file_unl_list)
-        log_to_terminal(f"[DATA] 数据加载完毕。合并后营业执照 {len(biz)} 条，合并后无证卷宗 {len(unl)} 条。")
+        log_to_terminal(f"[DATA] 数据加载完毕。合并后营业执照 {len(biz)} 条，无证卷宗 {len(unl)} 条。")
 
-        # --- 步骤 2: 数据清洗与对齐 ---
-        log_to_terminal("[CLEAN] 启动数据清洗管线，进行字段对齐与缺失值探测...")
-        fill_dict = {'公司名称':'未知', '法定代表人':'未知', '经营范围':'未知', '天眼评分':0, '统一社会信用代码':'未知'}
-        biz = biz.rename(columns={'天眼评分': '信用值'}).fillna(fill_dict)
-        unl = unl.rename(columns={'天眼评分': '信用值'}).fillna(fill_dict)
+        # --- 步骤 2: 数据清洗与对齐 (防崩溃补全机制) ---
+        log_to_terminal("[CLEAN] 启动数据清洗管线，进行防崩溃字段检测与强制补全...")
+        required_cols = {
+            '公司名称': '未知', 
+            '法定代表人': '未知', 
+            '经营范围': '未知', 
+            '信用值': 0, 
+            '统一社会信用代码': '未知'
+        }
+        
+        for col, default_val in required_cols.items():
+            if col not in biz.columns: biz[col] = default_val
+            if col not in unl.columns: unl[col] = default_val
+                
+        biz = biz.fillna(required_cols)
+        unl = unl.fillna(required_cols)
+        
+        # 安全转数字
         biz['信用值'] = pd.to_numeric(biz['信用值'], errors='coerce').fillna(0)
         unl['信用值'] = pd.to_numeric(unl['信用值'], errors='coerce').fillna(0)
 
@@ -219,19 +243,16 @@ if start_btn:
         prob_scope = model_scope.predict_proba(X_scope)[:, 1]
         log_to_terminal("[NLP] [经营范围] 语义空间向量化完成。")
 
-        # --- 步骤 4.3: 信用偏离计算 (【修改2】GMM 高斯混合模型) ---
-        log_to_terminal("[MATH] 启动高斯混合模型 (GMM) 进行信用值概率映射...")
+        # 4.3 信用偏离计算 (GMM 高斯混合模型)
+        log_to_terminal("[MATH] 启动高斯混合模型 (GMM) 进行信用值概率分布映射...")
         credit_values = df_all[['信用值']].values
-        # 训练 2 个组件的 GMM (寻找高分群体和低分群体分布)
         gmm = GaussianMixture(n_components=2, random_state=42)
         gmm.fit(credit_values)
-        # 找出均值较低的分布组件（均值越低，代表该分布群体信用越差/风险越高）
         risk_component_idx = np.argmin(gmm.means_.flatten())
-        # 计算每个样本属于"高风险低分群体"分布的概率
         prob_credit = gmm.predict_proba(credit_values)[:, risk_component_idx]
         log_to_terminal("[MATH] GMM 聚类映射完毕，已将绝对信用分转化为分布概率。")
 
-        # --- 步骤 5: AI 权重融合 (【修改3】30-50-20 配比) ---
+        # --- 步骤 5: AI 权重融合 (30-50-20 配比) ---
         log_to_terminal("[ML-CORE] 正在执行三权融合决策 (名称30% | 范围50% | 信用20%)...")
         combined_prob = (prob_name * 0.30) + (prob_scope * 0.50) + (prob_credit * 0.20)
         df_all['无证户综合概率(%)'] = np.round(combined_prob * 100, 2)
@@ -245,14 +266,12 @@ if start_btn:
         scope_features = vec_scope.get_feature_names_out()
         
         for idx in range(len(target_pool)):
-            # 提取名称词
             row_n = X_name.getrow(target_pool.index[idx])
             top_word_n = "常规名"
             if row_n.nnz > 0:
                 top_idx_n = row_n.toarray()[0].argsort()[-1]
                 top_word_n = name_features[top_idx_n]
             
-            # 提取范围词
             row_s = X_scope.getrow(target_pool.index[idx])
             top_word_s = "常规业务"
             if row_s.nnz > 0:
@@ -260,7 +279,6 @@ if start_btn:
                 top_word_s = scope_features[top_idx_s]
                 
             orig_credit = target_pool.iloc[idx]['信用值']
-            # 【修改3】同步更新解释器里的权重显示
             p_n = prob_name[target_pool.index[idx]] * 30.0
             p_s = prob_scope[target_pool.index[idx]] * 50.0
             p_c = prob_credit[target_pool.index[idx]] * 20.0
@@ -295,7 +313,6 @@ if start_btn:
 
         st.divider()
 
-    # --- 风险解释示例 (更新公式说明) ---
         with st.expander("💡 了解 AI 白盒解释器如何计算风险？(GMM 与新权重版)", expanded=True):
             col_ex1, col_ex2 = st.columns([1, 2])
             with col_ex1:
@@ -318,7 +335,6 @@ if start_btn:
             st.markdown(r"""
             #### 📚 核心专业名词解释与底层计算公式
             * **GMM (高斯混合模型)**：一种无监督的概率聚类模型。系统将所有店铺的信用分输入模型，自动拟合出两个正态（高斯）分布的曲线——一根代表“高分正常群体”，一根代表“低分异常群体”。当输入一个具体分数时，GMM 会计算该分数“属于低分异常群体”的数学概率，这比直接对分数做线性相减更加科学平滑。
-              * **公式核心**：$$P(x) = \sum_{i=1}^{K} \phi_i \mathcal{N}(x | \mu_i, \Sigma_i)$$ （系统取低 $\mu$ 分布的条件概率）
             * **权重分配体系**：根据业务经验对模型决策进行干预。当前版本设定：**公司名称 30%，经营范围（业务实质） 50%，第三方信用 20%**。
             * **TF-IDF 与 随机森林**：名称和范围仍通过计算词频与逆文档频率，喂入随机森林产生基于文本的分类概率。
             """)
@@ -327,7 +343,6 @@ if start_btn:
         st.subheader("🚨 打击名单 TOP 20（风险度从高到低排序）")
         display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', 'AI 判定依据', '风险等级', '监管建议', '法定代表人', '该商户负责人是否在无证户名录（可能重名）']
         
-        # 避免有的表没有“注册地址”列导致报错，这里加个判断
         if '注册地址' in target_pool.columns:
             display_cols.insert(-1, '注册地址')
 
