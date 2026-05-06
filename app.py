@@ -208,7 +208,7 @@ if start_btn:
         
         biz = biz.rename(columns=rename_rules)
         unl = unl.rename(columns=rename_rules)
-        lic = lic.rename(columns=rules=rename_rules)
+        lic = lic.rename(columns=rename_rules) # ✅ 已经修复了这里的语法错误
 
         # 2.2 强制补齐与去空格（防格式污染）
         required_cols = {'公司名称': '未知', '法定代表人': '未知', '经营范围': '未知', '信用值': 0, '统一社会信用代码': '未知'}
