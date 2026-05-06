@@ -162,9 +162,9 @@ st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 ")
 
 with st.sidebar:
     st.header("📂 1. 数据接入库")
-    file_lic_list = st.file_uploader("1️⃣ 上传【现有持证户】名单 (支持多选)", type=["xlsx", "csv"], accept_multiple_files=True)
-    file_unl_list = st.file_uploader("2️⃣ 上传【历史无证户】名单 (用于 AI 训练)", type=["xlsx", "csv"], accept_multiple_files=True)
-    file_biz_list = st.file_uploader("3️⃣ 上传【天眼查营业执照】大盘名单", type=["xlsx", "csv"], accept_multiple_files=True)
+    file_lic_list = st.file_uploader("1️⃣ 上传【持证户名录】", type=["xlsx", "csv"], accept_multiple_files=True)
+    file_unl_list = st.file_uploader("2️⃣ 上传【无证户名录】 ", type=["xlsx", "csv"], accept_multiple_files=True)
+    file_biz_list = st.file_uploader("3️⃣ 上传【营业执照名录】", type=["xlsx", "csv"], accept_multiple_files=True)
     st.info("💡 核心逻辑：基于统一社会信用代码进行匹配，从大盘名单中剥离持证户，留下【范围有烟但无证】的高危盲区。")
     start_btn = st.button("🚀 2. 启动 AI 深度筛查演算", type="primary", use_container_width=True)
 
@@ -189,7 +189,7 @@ def load_uploaded_files(file_list):
 
 if start_btn:
     if not file_biz_list or not file_lic_list:
-        st.warning("⚠️ 权限阻断：请至少上传【持证户名单】和【天眼查大盘名单】！")
+        st.warning("⚠️ 权限阻断：请至少上传【持证户名录】和【营业执照名录】！")
     else:
         st.markdown("---")
         st.markdown("### 💻 系统核心演算终端")
@@ -254,7 +254,7 @@ if start_btn:
         # ==============================================================
         # --- 步骤 2.5: 【核心逻辑】基于统一社会信用代码剔除已持证户 ---
         # ==============================================================
-        log_to_terminal("[FILTER] 启动核心漏斗逻辑：【天眼查大盘】 - 【持证库】 = 疑似无证盲区...")
+        log_to_terminal("[FILTER] 启动核心漏斗逻辑：【营业执照名录】 - 【持证库】 = 疑似无证盲区...")
         
         invalid_strs = {'未知', '', 'NAN', 'NAT', 'NONE', '无'}
 
