@@ -408,7 +408,7 @@ if start_btn:
                 st.markdown("""
                 **示例商户：** `沛县龙城某百货副食便利店`  
                 **统一社会信用代码：** `92320322MA******11`  
-                **经营范围：** `日用品销售,食品销售,散装食品销售`
+                **经营范围：** `日用品销售,食品销售,散装食品销售` 
                 **信用分：** `42分`  
                 **最终概率：** <span style='color:red; font-weight:bold; font-size:20px;'>92.5%</span>
                 """, unsafe_allow_html=True)
