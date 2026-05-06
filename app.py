@@ -13,6 +13,7 @@ import urllib.request
 import os
 import io
 import time
+import re
 
 # ==========================================
 # 0. 基础环境配置 (中文字体支持)
@@ -39,16 +40,33 @@ def get_chinese_font():
 title_font, label_font = get_chinese_font()
 
 # ==========================================
-# 1. NLP 预处理模块
+# 1. NLP 预处理模块 (核弹级去噪字典)
 # ==========================================
-CUSTOM_STOP_WORDS = {'有限','责任','分公司','集团','控股','股份','有限公司','徐州','地址','未知','公司', '店铺'}
-TOBACCO_WORDS = {'烟草制品零售','卷烟零售','雪茄零售','烟丝零售','香烟销售','烟草销售','烟草','卷烟','雪茄','烟丝','香烟'}
+# 极度扩充废话字典，强迫AI去寻找具有业务实质的特征词
+CUSTOM_STOP_WORDS = {
+    '徐州','徐州市','江苏','江苏省','地址','未知','公司','店铺','个体','工商户',
+    '商贸','企业','中心','工作室','经营部','销售部','市','省','区','县',
+    '项目','活动','服务','管理','咨询','开发','贸易','代理','批发','零售','销售',
+    '批零','兼营','制造','加工','用品','制品','器材','物资','产品','设备','科技',
+    '发展','实业','经营','相关','业务','一般','许可','包含','商行','厂','店',
+    '提供','预包装','散装','其他','一切','合法'
+}
+
+# 严格过滤烟草相关词汇，寻找烟草之外的隐性特征
+TOBACCO_WORDS = {'烟草','卷烟','雪茄','烟丝','香烟','电子烟','烟具','电子烟雾化物'}
 
 def custom_tokenizer(text):
     if not isinstance(text, str) or not text: return []
-    norm_map = {'百货店':'百货','百货商场':'百货','百货公司':'百货','百货超市':'百货','便利店':'便利','批发部':'批发'}
+    # 词汇归一化映射
+    norm_map = {'百货店':'百货','百货商场':'百货','百货公司':'百货','百货超市':'百货','便利店':'便利'}
     words = jieba.lcut(text)
-    processed_words = [norm_map.get(w, w) for w in words if len(w) > 1 and w not in CUSTOM_STOP_WORDS and not any(tob_w in w for tob_w in TOBACCO_WORDS)]
+    
+    processed_words = []
+    for w in words:
+        w = norm_map.get(w, w)
+        # 过滤单字、停用词、以及任何包含烟草字眼的词
+        if len(w) > 1 and w not in CUSTOM_STOP_WORDS and not any(tob in w for tob in TOBACCO_WORDS):
+            processed_words.append(w)
     return processed_words
 
 # ==========================================
@@ -90,9 +108,14 @@ def draw_analysis_charts(df, t_font, l_font):
     axes1[1, 1].set_title('信用值 vs 概率散点', fontproperties=t_font)
     axes1[1, 1].legend(prop=l_font)
 
-    high_risk_reps = df[df['该商户负责人是否在无证户名录（可能重名）'] == '是（可能重名）'].shape[0]
-    axes1[1, 2].pie([high_risk_reps, df.shape[0] - high_risk_reps], labels=['历史无证重名', '普通法人'], autopct='%1.1f%%', colors=['#FF6B6B', '#4ECDC4'], startangle=140, textprops={'fontproperties': l_font})
-    axes1[1, 2].set_title('法人身份重名比例', fontproperties=t_font)
+    top_risk_df = df[df['风险等级'].isin(['极高风险', '高风险'])]
+    if not top_risk_df.empty:
+        name_lengths = top_risk_df['公司名称'].astype(str).apply(len)
+        sizes = [len(name_lengths[name_lengths < 6]), len(name_lengths[(name_lengths >= 6) & (name_lengths <= 12)]), len(name_lengths[name_lengths > 12])]
+        axes1[1, 2].pie(sizes, labels=['<6字', '6-12字', '>12字'], autopct='%1.1f%%', colors=['#FF9999', '#66B2FF', '#99FF99'], startangle=140, textprops={'fontproperties': l_font})
+        axes1[1, 2].set_title('高危目标名称字数特征', fontproperties=t_font)
+    else:
+        axes1[1, 2].axis('off')
     
     fig1.tight_layout(pad=3.0) 
     st.pyplot(fig1)
@@ -139,7 +162,7 @@ def draw_analysis_charts(df, t_font, l_font):
 # ==========================================
 # 3. 核心加载逻辑与主程序
 # ==========================================
-st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 (信用代码漏斗版)")
+st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 (多维特征聚合版)")
 
 with st.sidebar:
     st.header("📂 1. 数据接入库")
@@ -255,28 +278,30 @@ if start_btn:
         log_to_terminal(f"[FILTER] 最终锁定 {len(biz)} 家【范围涉烟，但未持证】的高危盲区，准备开展 AI 综合研判。")
 
         # --- 步骤 3 & 4 & 5: AI 概率预测演算 ---
-        log_to_terminal("[GRAPH] 正在提取核心实体，执行跨表网络穿透比对...")
+        log_to_terminal("[NLP] 启动强制文本降噪：粉碎“有限责任”、“个体工商户”等通用废话特征...")
         
+        # 🔴 【核弹级防干扰清洗】：在分词前，直接用正则删掉毫无意义的后缀
         if not unl.empty:
-            bad_reps = set(unl[~unl['法定代表人'].isin(invalid_strs)]['法定代表人'].unique())
-            biz['该商户负责人是否在无证户名录（可能重名）'] = biz['法定代表人'].apply(lambda x: '是（可能重名）' if x in bad_reps else '否')
             biz['label'], unl['label'] = 0, 1
             df_all = pd.concat([unl, biz], ignore_index=True)
-            log_to_terminal(f"[GRAPH] 成功标记 {len(bad_reps)} 个高危法人特征，已完成污染链条标记。")
+            log_to_terminal("[GRAPH] 已加载无证户作为黑样本标签，准备开展监督学习。")
         else:
-            biz['该商户负责人是否在无证户名录（可能重名）'] = '否'
             biz['label'] = 0
             df_all = biz.copy()
 
+        # 去除名字和范围里的通用后缀，逼迫算法学习核心字眼
+        garbage_regex = r'有限责任公司|有限公司|个体工商户|分公司|股份有限公司|有限|责任|股份'
+        df_all['清洗后名称'] = df_all['公司名称'].astype(str).str.replace(garbage_regex, '', regex=True)
+        df_all['清洗后范围'] = df_all['经营范围'].astype(str).str.replace(garbage_regex, '', regex=True)
+
         # 文本特征工程
-        log_to_terminal("[NLP] 启动独立特征工程：公司名称与经营范围文本解析...")
+        log_to_terminal("[NLP] [公司名称] 执行 TF-IDF 多维向量化提取...")
         vec_name = TfidfVectorizer(tokenizer=custom_tokenizer, max_features=500)
-        X_name = vec_name.fit_transform(df_all['公司名称'])
-        log_to_terminal("[NLP] [公司名称] 文本特征 TF-IDF 高维映射与提取完毕。")
+        X_name = vec_name.fit_transform(df_all['清洗后名称'])
         
+        log_to_terminal("[NLP] [经营范围] 业务实质特征语义空间映射完成。")
         vec_scope = TfidfVectorizer(tokenizer=custom_tokenizer, max_features=500)
-        X_scope = vec_scope.fit_transform(df_all['经营范围'])
-        log_to_terminal("[NLP] [经营范围] 业务实质语义空间向量化完成。")
+        X_scope = vec_scope.fit_transform(df_all['清洗后范围'])
         
         # 信用值 GMM 映射
         log_to_terminal("[MATH] 激活高斯混合模型 (GMM)，执行企业信用异动偏离度测算...")
@@ -285,35 +310,49 @@ if start_btn:
         gmm.fit(credit_values)
         risk_component_idx = np.argmin(gmm.means_.flatten())
         prob_credit = gmm.predict_proba(credit_values)[:, risk_component_idx]
-        log_to_terminal("[MATH] GMM 聚类映射完毕，已将绝对信用分转化为低分高危群体的分布概率。")
 
         # 权重融合
-        log_to_terminal("[ML-CORE] 正在执行三权融合决策 (名称30% | 范围50% | 信用20%)...")
+        log_to_terminal("[ML-CORE] 正在执行三权融合决策 (名称复合30% | 范围复合50% | 信用风险20%)...")
         if not unl.empty:
             model_name = RandomForestClassifier(n_estimators=50, max_depth=10, random_state=42).fit(X_name, df_all['label'])
             prob_name = model_name.predict_proba(X_name)[:, 1]
             model_scope = RandomForestClassifier(n_estimators=50, max_depth=10, random_state=42).fit(X_scope, df_all['label'])
             prob_scope = model_scope.predict_proba(X_scope)[:, 1]
             combined_prob = (prob_name * 0.30) + (prob_scope * 0.50) + (prob_credit * 0.20)
-            log_to_terminal("[ML-CORE] 全局算法联合编译完成，推理结果已广播至目标节点。")
+            log_to_terminal("[ML-CORE] 全局算法联合编译完成，多维特征组合概率已生成。")
         else:
             combined_prob = prob_credit * 1.0  
-            log_to_terminal("[ML-CORE] 仅使用 GMM 信用基准完成风险测算。")
 
         df_all['无证户综合概率(%)'] = np.round(combined_prob * 100, 2)
         target_pool = df_all[df_all['label'] == 0].copy()
         
-        # --- 步骤 6: 白盒归因 ---
-        log_to_terminal("[EXPLAINER] 激活 AI 白盒解释器，生成可追溯证据链...")
+        # --- 步骤 6: 白盒归因 (🔴 复合词簇提取版) ---
+        log_to_terminal("[EXPLAINER] 激活 AI 复合解释器，追踪高危特征词簇组合...")
+        
+        # 提取前 k 个最具代表性的特征词，组成“特征簇”
+        def extract_top_k_words(row_vector, features, top_k):
+            if row_vector.nnz == 0: return "隐性特征"
+            arr = row_vector.toarray()[0]
+            # 仅保留权重大于 0 的特征
+            non_zero_indices = np.where(arr > 0)[0]
+            if len(non_zero_indices) == 0: return "隐性特征"
+            # 取出权重最高的前 K 个词
+            top_indices = non_zero_indices[np.argsort(arr[non_zero_indices])][-top_k:][::-1]
+            words = [features[i] for i in top_indices]
+            return "+".join(words)
+
         explanations = []
         name_features = vec_name.get_feature_names_out()
         scope_features = vec_scope.get_feature_names_out()
         
         for idx in range(len(target_pool)):
+            # 取出该条数据的特征向量
             row_n = X_name.getrow(target_pool.index[idx])
-            top_word_n = name_features[row_n.toarray()[0].argsort()[-1]] if row_n.nnz > 0 else "常规名"
             row_s = X_scope.getrow(target_pool.index[idx])
-            top_word_s = scope_features[row_s.toarray()[0].argsort()[-1]] if row_s.nnz > 0 else "常规业务"
+            
+            # 提取复合特征组合 (名字抓前2个，范围抓前3个词)
+            top_words_n = extract_top_k_words(row_n, name_features, top_k=2)
+            top_words_s = extract_top_k_words(row_s, scope_features, top_k=3)
                 
             orig_credit = target_pool.iloc[idx]['信用值']
             p_c = prob_credit[target_pool.index[idx]] * 20.0
@@ -321,12 +360,13 @@ if start_btn:
             if not unl.empty:
                 p_n = prob_name[target_pool.index[idx]] * 30.0
                 p_s = prob_scope[target_pool.index[idx]] * 50.0
-                explanations.append(f"{top_word_n}({p_n:.1f}%) + {top_word_s}({p_s:.1f}%) + 信用风险({p_c:.1f}%)")
+                # 明确展示：是这些特征词的组合产生了复合概率
+                explanations.append(f"复合特征[{top_words_n}]({p_n:.1f}%) + 复合业务[{top_words_s}]({p_s:.1f}%) + 信用风险({p_c:.1f}%)")
             else:
-                explanations.append(f"经营范围涉卷烟 + 企业信用评分偏离")
+                explanations.append(f"复合特征[{top_words_n}] + 复合业务[{top_words_s}] + 信用偏离度")
         
         target_pool['AI 判定依据'] = explanations
-        log_to_terminal("[EXPLAINER] 白盒归因与溯源解析瞬间完成，违规证据链已封装。")
+        log_to_terminal("[EXPLAINER] 多维特征组合溯源解析完成，违规证据链已封装。")
 
         # --- 风险定级 ---
         def assign_risk(p):
@@ -354,20 +394,20 @@ if start_btn:
         st.divider()
 
         # 恢复 AI 白盒计算说明
-        with st.expander("💡 了解 AI 白盒解释器如何计算风险？(GMM 与新权重版)", expanded=True):
+        with st.expander("💡 了解 AI 复合解释器如何计算风险？(GMM 与词簇组合版)", expanded=True):
             col_ex1, col_ex2 = st.columns([1, 2])
             with col_ex1:
                 st.markdown("""
-                **示例商户：** `沛县龙城街道某百货超市`  
+                **示例商户：** `沛县龙城某百货副食便利店`  
                 **统一社会信用代码：** `92320322MA******11`  
                 **信用分：** `42分`  
                 **最终概率：** <span style='color:red; font-weight:bold; font-size:20px;'>72.8%</span>
                 """, unsafe_allow_html=True)
             with col_ex2:
                 st.info("""
-                **各因素量化贡献拆解 (权重 30%-50%-20%)：**
-                * **1. 公司名称贡献度 (25.4/30.0)**：AI 提取关键词，经过计算名称维度的原始高危概率为 84.7%，按 30% 权重折算为 25.4%。
-                * **2. 经营范围贡献度 (33.7/50.0)**：经营范围在历史无证节点落入高风险概率为 67.5%，按 50% 权重折算为 33.7%。
+                **多维特征簇贡献拆解 (权重 30%-50%-20%)：**
+                * **1. 公司名称复合特征 (25.4/30.0)**：AI 剥离无效后缀后，提取到高危特征组合 `[百货+副食]`。随机森林根据此组合测算的原始高危概率为 84.7%，按 30% 权重折算贡献度为 25.4%。
+                * **2. 业务实质复合特征 (33.7/50.0)**：排除了通用的“销售/零售”等词，抓取到了核心业务特征簇 `[日用+食品+散装]`。该业务组合落入高风险分支的概率为 67.5%，按 50% 权重折算贡献度为 33.7%。
                 * **3. 信用分 GMM 映射 (13.7/20.0)**：利用高斯混合模型，测算“42分”属于低分高危群体的分布概率为 68.5%，按 20% 权重折算为 13.7%。
                 * **综合判定公式**：$25.4 + 33.7 + 13.7 = 72.8$。得出最终概率为72.8%。
                 """)
@@ -375,14 +415,14 @@ if start_btn:
             st.markdown("---")
             st.markdown(r"""
             #### 📚 核心专业名词解释与底层计算公式
-            * **GMM (高斯混合模型)**：一种无监督的概率聚类模型。系统将所有店铺的信用分输入模型，自动拟合出两个正态（高斯）分布的曲线——一根代表“高分正常群体”，一根代表“低分异常群体”。当输入一个具体分数时，GMM 会计算该分数“属于低分异常群体”的数学概率，这比直接对分数做线性相减更加科学平滑。
+            * **复合特征追踪技术**：旧版算法在解释结果时只选取权重排名第一的单个词（如“有限责任”），容易引发误解。新版引擎在进入 AI 前先强制销毁了所有“无业务区分度”的通用后缀与行业动词，随后追踪促成决策的**词汇组合（如 词A + 词B + 词C）**，直观还原 AI 的真实判定逻辑。
+            * **GMM (高斯混合模型)**：一种无监督的概率聚类模型。系统将所有店铺的信用分输入模型，自动拟合出两个正态（高斯）分布的曲线——一根代表“高分正常群体”，一根代表“低分异常群体”。当输入一个具体分数时，GMM 会计算该分数“属于低分异常群体”的数学概率。
             * **权重分配体系**：根据业务经验对模型决策进行干预。当前版本设定：**公司名称 30%，经营范围（业务实质） 50%，第三方信用 20%**。
-            * **TF-IDF 与 随机森林**：名称和范围仍通过计算词频与逆文档频率，喂入随机森林产生基于文本的分类概率。
             """)
 
         # --- 打击名单 ---
-        st.subheader("🚨 疑似无证经营盲区名单 TOP 20（按风险度排序）")
-        display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', 'AI 判定依据', '风险等级', '监管建议', '法定代表人', '该商户负责人是否在无证户名录（可能重名）']
+        st.subheader("🚨 打击名单 TOP 20（Strike List TOP 20 按风险度排序）")
+        display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', 'AI 判定依据', '风险等级', '监管建议', '法定代表人']
         
         if '注册地址' in target_pool.columns:
             display_cols.insert(-1, '注册地址')
