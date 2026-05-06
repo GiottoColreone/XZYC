@@ -69,7 +69,7 @@ def custom_tokenizer(text):
 # 2. 可视化模块
 # ==========================================
 def draw_analysis_charts(df, t_font, l_font):
-    st.markdown("### 📊 AI 模型全盘数据可视化分析")
+    st.markdown("### 📊 智能筛查模型全盘数据可视化分析")
     color_map = {'低风险': '#32CD32', '中风险': '#FFD700', '高风险': '#FF6B00', '极高风险': '#FF0000'}
     level_order = ['低风险', '中风险', '高风险', '极高风险']
     
@@ -158,7 +158,7 @@ def draw_analysis_charts(df, t_font, l_font):
 # ==========================================
 # 3. 核心加载逻辑与主程序
 # ==========================================
-st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 ")
+st.title("👁️ 卷烟无证经营户智能筛查模型 ")
 
 with st.sidebar:
     st.header("📂 1. 数据接入库")
@@ -166,7 +166,7 @@ with st.sidebar:
     file_unl_list = st.file_uploader("2️⃣ 上传【无证户名录】 ", type=["xlsx", "csv"], accept_multiple_files=True)
     file_biz_list = st.file_uploader("3️⃣ 上传【营业执照名录】", type=["xlsx", "csv"], accept_multiple_files=True)
     st.info("💡 核心逻辑：基于统一社会信用代码进行匹配，从大盘名单中剥离持证户，留下【范围有烟但无证】的高危盲区。")
-    start_btn = st.button("🚀 2. 启动 AI 深度筛查演算", type="primary", use_container_width=True)
+    start_btn = st.button("🚀 2. 启动深度筛查演算", type="primary", use_container_width=True)
 
 def load_uploaded_files(file_list):
     df_list = []
@@ -271,9 +271,9 @@ if start_btn:
         
         filtered_count = orig_biz_len - len(biz)
         log_to_terminal(f"[FILTER] 🟢 过滤成功！基于唯一信用代码，已从大盘中精准剔除 {filtered_count} 家商户。")
-        log_to_terminal(f"[FILTER] 最终锁定 {len(biz)} 家【范围涉烟，但未持证】的高危盲区，准备开展 AI 综合研判。")
+        log_to_terminal(f"[FILTER] 最终锁定 {len(biz)} 家【范围涉烟，但未持证】的高危盲区，准备开展综合研判。")
 
-        # --- 步骤 3 & 4 & 5: AI 概率预测演算 ---
+        # --- 步骤 3 & 4 & 5: 概率预测演算 ---
         log_to_terminal("[NLP] 启动强制文本降噪：剥离经营范围冗余括号、粉碎通用废话特征...")
         
         if not unl.empty:
@@ -341,7 +341,7 @@ if start_btn:
         target_pool = df_all[df_all['label'] == 0].copy()
         
         # --- 步骤 6: 白盒归因 (🔴 极致精简版：仅说内容) ---
-        log_to_terminal("[EXPLAINER] 激活 AI 解释器，追踪高危特征词簇组合...")
+        log_to_terminal("[EXPLAINER] 激活解释器，追踪高危特征词簇组合...")
         
         def extract_top_k_words(row_vector, features, top_k):
             if row_vector.nnz == 0: return "无显著特征"
@@ -374,7 +374,7 @@ if start_btn:
             else:
                 explanations.append(f"[{top_words_n}] + [{top_words_s}] + 信用偏离")
         
-        target_pool['AI 判定依据'] = explanations
+        target_pool['判定依据'] = explanations
         log_to_terminal("[EXPLAINER] 多维特征组合溯源解析完成，违规证据链已封装。")
 
         # --- 风险定级 ---
@@ -398,11 +398,11 @@ if start_btn:
         m1.metric("极高风险数量 (80%-100%)", f"{len(target_pool[target_pool['风险等级']=='极高风险'])} 家", f"占盲区底册 {len(target_pool[target_pool['风险等级']=='极高风险'])/total*100:.2f}%" if total >0 else "0%")
         m2.metric("高风险数量 (60%-79%)", f"{len(target_pool[target_pool['风险等级']=='高风险'])} 家", f"占盲区底册 {len(target_pool[target_pool['风险等级']=='高风险'])/total*100:.2f}%" if total >0 else "0%")
         m3.metric("中风险数量 (35%-59%)", f"{len(target_pool[target_pool['风险等级']=='中风险'])} 家", f"占盲区底册 {len(target_pool[target_pool['风险等级']=='中风险'])/total*100:.2f}%" if total >0 else "0%")
-        m4.metric("精准锁定总规模", f"{total} 条", f"AI筛查时效: 极速 ({calc_speed} 条/秒)")
+        m4.metric("精准锁定总规模", f"{total} 条", f"筛查时效: 极速 ({calc_speed} 条/秒)")
 
         st.divider()
 
-        with st.expander("💡 了解 AI 解释器如何计算风险与处理长文本？", expanded=True):
+        with st.expander("💡 了解如何计算风险？", expanded=True):
             col_ex1, col_ex2 = st.columns([1, 2])
             with col_ex1:
                 st.markdown("""
@@ -417,7 +417,7 @@ if start_btn:
                 **判定依据展示范例：** `[百货+副食](28.4%) + [日用+食品+散装](45.1%) + 信用风险(19.0%)`
                 
                 **各因素量化贡献拆解 (权重 30%-50%-20%)：**
-                * **1. 企业名称概率 (28.4/30.0)**：AI 提取高危特征组合 `[百货+副食]`。系统按 30% 权重折算贡献度为 28.4%。
+                * **1. 企业名称概率 (28.4/30.0)**：提取高危特征组合 `[百货+副食]`。系统按 30% 权重折算贡献度为 28.4%。
                 * **2. 经营范围概率 (45.1/50.0)**：排除了通用的“一般项目/许可项目”及括号内的审批条文废话，抓取到了核心业务特征簇 `[日用+食品+散装]`。系统按 50% 权重折算贡献度为 45.1%。
                 * **3. 信用分概率 (19.0/20.0)**：利用高斯混合模型，测算“42分”属于低分高危群体的分布概率，按 20% 权重折算为 19.0%。
                 * **综合判定公式**：$28.4 + 45.1 + 19.0 = 92.5$。得出最终概率为92.5%。
@@ -425,7 +425,7 @@ if start_btn:
 
         # --- 打击名单 ---
         st.subheader("🚨 打击名单 TOP 20（Strike List TOP 20 按风险度排序）")
-        display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', 'AI 判定依据', '风险等级', '监管建议', '法定代表人']
+        display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', '判定依据', '风险等级', '监管建议', '法定代表人']
         
         if '注册地址' in target_pool.columns:
             display_cols.insert(-1, '注册地址')
@@ -445,8 +445,8 @@ if start_btn:
         # 🔴【新增】：双维度 分词概率 TOP 10 榜单 (真实测算单一特征高危概率)
         # ==============================================================
         st.divider()
-        st.subheader("🏆 AI 核心分词概率 TOP 10 榜单 (底层特征图谱)")
-        st.caption("以下榜单展示的是：当一个企业的名字或范围中**仅仅命中该词**时，AI 模型给出的独立高危概率。")
+        st.subheader("🏆 核心分词概率 TOP 10 榜单 ")
+        st.caption("以下榜单展示的是：当一个企业的名字或范围中**仅仅命中该词**时，模型给出的独立高危概率。")
         
         col_top_name, col_top_scope = st.columns(2)
         
