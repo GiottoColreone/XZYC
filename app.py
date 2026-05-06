@@ -139,24 +139,26 @@ def draw_analysis_charts(df, t_font, l_font):
 # ==========================================
 # 3. 核心加载逻辑与主程序
 # ==========================================
-st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 (精准洗涤版)")
+st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 (多源数据精准穿透版)")
 
 with st.sidebar:
     st.header("📂 1. 数据接入库")
-    file_biz_list = st.file_uploader("上传【营业执照】名单 (支持多选)", type=["xlsx", "csv"], accept_multiple_files=True)
-    file_unl_list = st.file_uploader("上传【历史无证户】名单 (支持多选)", type=["xlsx", "csv"], accept_multiple_files=True)
-    file_lic_list = st.file_uploader("上传【现有持证户】名单 (可选 / 自动剔除)", type=["xlsx", "csv"], accept_multiple_files=True)
-    st.info("💡 提示：系统将通过【统一社会信用代码】自动从营业执照中剔除“现有持证户”和“历史无证户”。")
+    file_lic_list = st.file_uploader("1️⃣ 上传【现有持证户】名单 (支持多选)", type=["xlsx", "csv"], accept_multiple_files=True)
+    file_unl_list = st.file_uploader("2️⃣ 上传【历史无证户】名单 (支持多选)", type=["xlsx", "csv"], accept_multiple_files=True)
+    file_biz_list = st.file_uploader("3️⃣ 上传【天眼查营业执照】大盘名单", type=["xlsx", "csv"], accept_multiple_files=True)
+    st.info("💡 提示：系统将自动映射异构表头，并双向剔除已存在的持证户与无证户，锁定纯净盲区。")
     start_btn = st.button("🚀 2. 启动 AI 深度筛查演算", type="primary", use_container_width=True)
 
 def load_uploaded_files(file_list):
     df_list = []
     for f in file_list:
         df = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
+        # 天眼查特有免责声明跳过逻辑
         if '声明' in str(df.columns[0]) or '公司名称' not in df.columns:
             f.seek(0)
             df = pd.read_excel(f, header=1) if f.name.endswith('.xlsx') else pd.read_csv(f, header=1)
-        if len(df.columns) > 0:
+        # 提取天眼查的信用分（最后一列）
+        if '声明' not in str(df.columns[0]) and len(df.columns) > 0 and '公司名称' in df.columns:
             last_col_name = df.columns[-1]
             df = df.rename(columns={last_col_name: '信用值'})
         df_list.append(df)
@@ -166,8 +168,8 @@ def load_uploaded_files(file_list):
 
 
 if start_btn:
-    if not file_biz_list or not file_unl_list:
-        st.warning("⚠️ 权限阻断：请先在左侧分别上传至少一个营业执照和历史无证户数据文件！")
+    if not file_biz_list or not file_unl_list or not file_lic_list:
+        st.warning("⚠️ 权限阻断：请先在左侧按顺序上传完整的【持证户】、【无证户】和【营业执照】数据文件！")
     else:
         st.markdown("### 💻 系统核心演算终端")
         log_container = st.container(height=350)
@@ -183,19 +185,32 @@ if start_btn:
 
         start_time = time.time()
 
-        # --- 步骤 1: 初始化与数据加载 ---
-        log_to_terminal("[SYSTEM] 正在初始化天眼稽查引擎...")
-        biz = load_uploaded_files(file_biz_list)
+        # --- 步骤 1: 数据加载 ---
+        log_to_terminal("[SYSTEM] 正在初始化天眼稽查引擎，读取异构数据源...")
+        lic = load_uploaded_files(file_lic_list)
         unl = load_uploaded_files(file_unl_list)
-        lic = load_uploaded_files(file_lic_list) if file_lic_list else pd.DataFrame()
+        biz = load_uploaded_files(file_biz_list)
         
-        log_msg = f"[DATA] 合并后营业执照 {len(biz)} 条，无证卷宗 {len(unl)} 条"
-        if not lic.empty: log_msg += f"，持证白名单 {len(lic)} 条。"
-        else: log_msg += "。"
-        log_to_terminal(log_msg)
+        log_to_terminal(f"[DATA] 数据加载完毕。待查执照 {len(biz)} 条，无证卷宗 {len(unl)} 条，持证白名单 {len(lic)} 条。")
 
-        # --- 步骤 2: 数据清洗与强制格式化 (解决匹配为0的核心) ---
-        log_to_terminal("[CLEAN] 启动底层数据清洗：清除所有隐藏空格与异常格式...")
+        # --- 步骤 2: 【核心修复】智能列名映射与清洗 ---
+        log_to_terminal("[CLEAN] 启动底层数据防污染清洗：多源表头智能映射与去空化处理...")
+        
+        # 2.1 映射字典：解决不同业务系统列名不统一的问题
+        rename_rules = {
+            '企业(字号)名称': '公司名称',
+            '企业（字号）名称': '公司名称',
+            '企业名称': '公司名称',
+            '经营人': '法定代表人',
+            '持证人': '法定代表人',
+            '负责人': '法定代表人'
+        }
+        
+        biz = biz.rename(columns=rename_rules)
+        unl = unl.rename(columns=rename_rules)
+        lic = lic.rename(columns=rules=rename_rules)
+
+        # 2.2 强制补齐与去空格（防格式污染）
         required_cols = {'公司名称': '未知', '法定代表人': '未知', '经营范围': '未知', '信用值': 0, '统一社会信用代码': '未知'}
         
         for df_temp in [biz, unl, lic]:
@@ -204,40 +219,43 @@ if start_btn:
                     if col not in df_temp.columns: df_temp[col] = default_val
                 df_temp.fillna(required_cols, inplace=True)
                 
-                # 【防污染核心代码】：强制转为字符串并去除两端空格（防Excel导出带隐形空格）
+                # 【终极防污染】：转文本 -> 去空格 -> 把中文全角括号转为英文半角括号
                 for text_col in ['公司名称', '法定代表人', '统一社会信用代码']:
-                    df_temp[text_col] = df_temp[text_col].astype(str).str.strip()
+                    df_temp[text_col] = df_temp[text_col].astype(str).str.strip().str.replace('（', '(').str.replace('）', ')')
 
         biz['信用值'] = pd.to_numeric(biz['信用值'], errors='coerce').fillna(0)
         unl['信用值'] = pd.to_numeric(unl['信用值'], errors='coerce').fillna(0)
 
-        # --- 步骤 2.5: 使用信用代码剔除持证户与无证户 ---
-        log_to_terminal("[FILTER] 正在使用【统一社会信用代码】进行全库交叉比对与自动剥离...")
+        # --- 步骤 2.5: 双向金库剥离 (无证+持证 同时剔除) ---
+        log_to_terminal("[FILTER] 启动双向净网防御：联合使用【信用代码】与【公司名称】剥离已知对象...")
+        
         exclude_codes = set()
-        
-        # 将无证和持证的信用代码都放进排除名单
+        exclude_names = set()
+        invalid_strs = {'未知', '', 'nan', 'NaN', '无'}
+
+        # 收集持证户的排查特征
         if not lic.empty:
-            lic_codes = set(lic[~lic['统一社会信用代码'].isin(['未知', '', 'nan'])]['统一社会信用代码'].unique())
-            exclude_codes.update(lic_codes)
-        
+            exclude_codes.update(set(lic[~lic['统一社会信用代码'].isin(invalid_strs)]['统一社会信用代码'].unique()))
+            exclude_names.update(set(lic[~lic['公司名称'].isin(invalid_strs)]['公司名称'].unique()))
+
+        # 收集无证户的排查特征 (即使没有代码，也有公司名称兜底)
         if not unl.empty:
-            unl_codes = set(unl[~unl['统一社会信用代码'].isin(['未知', '', 'nan'])]['统一社会信用代码'].unique())
-            exclude_codes.update(unl_codes)
+            exclude_codes.update(set(unl[~unl['统一社会信用代码'].isin(invalid_strs)]['统一社会信用代码'].unique()))
+            exclude_names.update(set(unl[~unl['公司名称'].isin(invalid_strs)]['公司名称'].unique()))
 
         orig_biz_len = len(biz)
-        if exclude_codes:
-            # 只保留不在排除名单里的营业执照
-            biz = biz[~biz['统一社会信用代码'].isin(exclude_codes)]
-            filtered_count = orig_biz_len - len(biz)
-            log_to_terminal(f"[FILTER] 🟢 清洗完毕！已成功从营业执照中剔除 {filtered_count} 家(持证或已知无证)的商户。")
-        else:
-            log_to_terminal("[FILTER] ⚠️ 未提取到有效的信用代码用于过滤。")
-            
-        log_to_terminal(f"[FILTER] 剩余 {len(biz)} 家“纯待查”商户，即将开展核心演算。")
+        
+        # 【双轨剔除】：只要信用代码重合 或者 公司名字重合，一律剔除！
+        biz = biz[~biz['统一社会信用代码'].isin(exclude_codes) & ~biz['公司名称'].isin(exclude_names)]
+        
+        filtered_count = orig_biz_len - len(biz)
+        log_to_terminal(f"[FILTER] 🟢 联合清洗完毕！已成功从待查执照大盘中净身剔除 {filtered_count} 家(持证户及历史无证户)。")
+        log_to_terminal(f"[FILTER] 剩余 {len(biz)} 家“纯盲区”商户，即将开展核心演算。")
 
         # --- 步骤 3: 实体特征提取与法人比对 ---
-        log_to_terminal("[GRAPH] 正在从历史档案提取核心实体，执行跨表网络穿透比对...")
-        bad_reps = set(unl[~unl['法定代表人'].isin(['未知', '', 'nan', '无'])]['法定代表人'].unique())
+        log_to_terminal("[GRAPH] 正在从历史无证档案提取核心实体，执行高危法人网络穿透比对...")
+        
+        bad_reps = set(unl[~unl['法定代表人'].isin(invalid_strs)]['法定代表人'].unique())
         biz['该商户负责人是否在无证户名录（可能重名）'] = biz['法定代表人'].apply(lambda x: '是（可能重名）' if x in bad_reps else '否')
         
         biz['label'], unl['label'] = 0, 1
@@ -268,6 +286,7 @@ if start_btn:
         log_to_terminal("[ML-CORE] 正在执行三权融合决策 (名称30% | 范围50% | 信用20%)...")
         combined_prob = (prob_name * 0.30) + (prob_scope * 0.50) + (prob_credit * 0.20)
         df_all['无证户综合概率(%)'] = np.round(combined_prob * 100, 2)
+        
         # 目标池仅保留刚才筛出的 biz 商户 (label == 0)
         target_pool = df_all[df_all['label'] == 0].copy()
         
@@ -313,7 +332,7 @@ if start_btn:
         log_to_terminal(f"[SYSTEM] ✅ 演算结束！用时 {elapsed_time:.2f} 秒。系统正在生成大屏...")
 
         # --- 结果展示区 ---
-        st.success("🎯 稽查演算收官！已成功从底册中精准剔除重复项，完成净网测算。")
+        st.success("🎯 稽查演算收官！已成功跨表洗脱重名重号数据，完成净网测算。")
         m1, m2, m3, m4 = st.columns(4)
         total = len(target_pool)
         
@@ -324,15 +343,17 @@ if start_btn:
 
         st.divider()
 
-        with st.expander("💡 了解本模型如何实现“净网排查”？", expanded=True):
+        with st.expander("💡 了解本模型如何实现多源数据的“净网排查”？", expanded=True):
             st.info("""
-            **1. 数据防污染清洗**：导出数据往往带有肉眼看不见的空格字符，导致 AI 认为“张三”和“ 张三 ”是两个人。本模型增加了强制清洗层，100% 提取有效比对字符串。
+            **1. 表头智能动态映射**：实际业务中，系统自动将`企业(字号)名称`、`持证人`、`经营人`等非标表头，统一翻译为AI核心可读的`公司名称`与`法定代表人`，确保跨网比对成功率。
             
-            **2. 统一社会信用代码过滤**：系统将【持证户名单】和【历史无证户】提取统一社会信用代码合并为“已知对象池”。只要营业执照中的企业信用代码落入这个池子，立刻剥离不作计算，确保算力集中在未知风险商户上。
+            **2. 防护装甲级别去污染**：系统会对核心字段进行去空、去NaN、强转字符、并在底层将中文全角括号（）统一替换为半角括号()，规避了大量因为手录入习惯不同导致的“同店不同名”假象。
+            
+            **3. 双引擎名单剥离**：由于无证户文件缺乏统一社会信用代码，本模型升级采用**【信用代码+公司名称 双边核查机制】**，将历史无证和现有持证从待查执照中干净利落地砍掉，不再做无效的重复稽查。
             """)
 
         # --- 打击名单 ---
-        st.subheader("🚨 稽查排查名单 TOP 20（风险度从高到低排序，已去除已知名单）")
+        st.subheader("🚨 智能稽查排查盲区名单 TOP 20（风险度从高到低排序，已去除已知名单）")
         display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', 'AI 判定依据', '风险等级', '监管建议', '法定代表人', '该商户负责人是否在无证户名录（可能重名）']
         
         if '注册地址' in target_pool.columns:
@@ -347,7 +368,7 @@ if start_btn:
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             target_pool[display_cols].to_excel(writer, index=False)
-        st.download_button("📥 导出最终排查名单 (净网版)", buffer, "天眼查风险排查名单_净网纯净版.xlsx", "application/vnd.ms-excel")
+        st.download_button("📥 导出最终稽查名单 (全网净洗版)", buffer, "天眼查风险排查名单_全网净洗版.xlsx", "application/vnd.ms-excel")
 
         st.divider()
         draw_analysis_charts(target_pool, title_font, label_font)
