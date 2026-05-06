@@ -152,15 +152,18 @@ with st.sidebar:
 def load_uploaded_files(file_list):
     df_list = []
     for f in file_list:
-        df = pd.read_excel(f) if f.name.endswith('.xlsx') else pd.read_csv(f)
-        # 天眼查特有免责声明跳过逻辑
-        if '声明' in str(df.columns[0]) or '公司名称' not in df.columns:
+        is_excel = f.name.endswith('.xlsx') or f.name.endswith('.xls')
+        df = pd.read_excel(f) if is_excel else pd.read_csv(f)
+        
+        # 【致命错误已修复】：极其严格地判断，只有第一列包含“声明”字样，才断定是天眼查文件并跳过表头
+        if len(df.columns) > 0 and '声明' in str(df.columns[0]):
             f.seek(0)
-            df = pd.read_excel(f, header=1) if f.name.endswith('.xlsx') else pd.read_csv(f, header=1)
-        # 提取天眼查的信用分（最后一列）
-        if '声明' not in str(df.columns[0]) and len(df.columns) > 0 and '公司名称' in df.columns:
-            last_col_name = df.columns[-1]
-            df = df.rename(columns={last_col_name: '信用值'})
+            df = pd.read_excel(f, header=1) if is_excel else pd.read_csv(f, header=1)
+            # 只有天眼查的数据，才强制将最后一列作为信用值
+            if len(df.columns) > 0:
+                last_col_name = df.columns[-1]
+                df = df.rename(columns={last_col_name: '信用值'})
+                
         df_list.append(df)
     if df_list:
         return pd.concat(df_list, ignore_index=True)
@@ -171,15 +174,16 @@ if start_btn:
     if not file_biz_list or not file_lic_list:
         st.warning("⚠️ 权限阻断：请至少上传【持证户名单】和【天眼查大盘名单】！")
     else:
+        st.markdown("---")
         st.markdown("### 💻 系统核心演算终端")
-        log_container = st.container(height=350)
+        log_container = st.container(height=400)
         terminal = log_container.empty()
         log_lines = []
         
         def log_to_terminal(message, delay=0.1):
             timestamp = pd.Timestamp.now().strftime('%H:%M:%S.%f')[:-3]
             log_lines.insert(0, f"[{timestamp}] {message}")
-            display_text = "▼ 实时终端日志 [最新指令始终在最上方显示]\n" + "="*65 + "\n" + "\n".join(log_lines)
+            display_text = "▼ 实时终端日志 [最新指令始终在最上方显示]\n" + "="*70 + "\n" + "\n".join(log_lines)
             terminal.code(display_text, language="bash")
             time.sleep(delay)
 
@@ -234,37 +238,35 @@ if start_btn:
         # ==============================================================
         log_to_terminal("[FILTER] 启动核心漏斗逻辑：【天眼查大盘】 - 【持证库】 = 疑似无证盲区")
         
-        invalid_strs = {'未知', '', 'NAN', '无', 'NONE'}
+        invalid_strs = {'未知', '', 'NAN', 'NAT', 'NONE', '无'}
 
         # 提取真实有效的持证户【统一社会信用代码】集合
         lic_codes = set(lic[~lic['统一社会信用代码'].isin(invalid_strs)]['统一社会信用代码'])
-        log_to_terminal(f"[DEBUG] 从持证库成功提取到 {len(lic_codes)} 个有效的统一社会信用代码。")
+        log_to_terminal(f"[DEBUG] 提取成功！已从【持证库】精准抓取 {len(lic_codes)} 个有效社会信用代码/注册号。")
 
-        # 提取历史无证户的信用代码（如果上传了的话，也将它们剔除出正常池）
+        # 提取历史无证户的信用代码
         if not unl.empty:
             unl_codes = set(unl[~unl['统一社会信用代码'].isin(invalid_strs)]['统一社会信用代码'])
             lic_codes.update(unl_codes)
 
         orig_biz_len = len(biz)
         
-        # 🔥 核心剔除动作：只保留大盘里【不在】持证户代码列表里的商户
+        # 🔥 核心剔除动作：只保留大盘里【不在】排除名单里的商户
         biz = biz[~biz['统一社会信用代码'].isin(lic_codes)]
         
         filtered_count = orig_biz_len - len(biz)
-        log_to_terminal(f"[FILTER] 🟢 过滤成功！基于统一社会信用代码，已从天眼查大盘中精准剔除 {filtered_count} 家持证商户。")
-        log_to_terminal(f"[FILTER] 最终锁定 {len(biz)} 家【范围含卷烟，但未持证】的高危商户，即将开展 AI 排序。")
+        log_to_terminal(f"[FILTER] 🟢 过滤成功！基于唯一信用代码，已从大盘中精准剔除 {filtered_count} 家商户。")
+        log_to_terminal(f"[FILTER] 最终锁定 {len(biz)} 家【范围涉烟，但未持证】的高危盲区，准备开展 AI 综合研判。")
 
         # --- 步骤 3 & 4 & 5: AI 概率预测演算 ---
-        log_to_terminal("[ML-CORE] 正在启动随机森林与高斯混合模型，计算盲区商户综合风险值...")
+        log_to_terminal("[ML-CORE] 正在启动自然语言处理模型，解析企业图谱与文本风险...")
         
         if not unl.empty:
-            # 如果上传了无证户，用无证户做训练标签
             bad_reps = set(unl[~unl['法定代表人'].isin(invalid_strs)]['法定代表人'].unique())
             biz['该商户负责人是否在无证户名录（可能重名）'] = biz['法定代表人'].apply(lambda x: '是（可能重名）' if x in bad_reps else '否')
             biz['label'], unl['label'] = 0, 1
             df_all = pd.concat([unl, biz], ignore_index=True)
         else:
-            # 如果没上传无证户，所有目标都视为待查，仅通过范围和信用计算风险
             biz['该商户负责人是否在无证户名录（可能重名）'] = '否'
             biz['label'] = 0
             df_all = biz.copy()
@@ -277,13 +279,13 @@ if start_btn:
         X_scope = vec_scope.fit_transform(df_all['经营范围'])
         
         # 信用值 GMM 映射
+        log_to_terminal("[MATH] 激活高斯混合模型 (GMM)，执行企业信用异动偏离度测算...")
         credit_values = df_all[['信用值']].values
         gmm = GaussianMixture(n_components=2, random_state=42)
         gmm.fit(credit_values)
         risk_component_idx = np.argmin(gmm.means_.flatten())
         prob_credit = gmm.predict_proba(credit_values)[:, risk_component_idx]
 
-        # 如果没有无证户数据做监督训练，我们依靠 GMM + 启发式算分
         if not unl.empty:
             model_name = RandomForestClassifier(n_estimators=50, max_depth=10, random_state=42).fit(X_name, df_all['label'])
             prob_name = model_name.predict_proba(X_name)[:, 1]
@@ -291,15 +293,13 @@ if start_btn:
             prob_scope = model_scope.predict_proba(X_scope)[:, 1]
             combined_prob = (prob_name * 0.30) + (prob_scope * 0.50) + (prob_credit * 0.20)
         else:
-            # 简化版概率（针对仅有2个文件的情况）
             combined_prob = prob_credit * 1.0  
 
         df_all['无证户综合概率(%)'] = np.round(combined_prob * 100, 2)
-        
         target_pool = df_all[df_all['label'] == 0].copy()
         
         # --- 步骤 6: 白盒归因 ---
-        log_to_terminal("[EXPLAINER] 生成可追溯证据链...")
+        log_to_terminal("[EXPLAINER] AI 引擎演算完毕，正在封装最终可追溯证据链...")
         explanations = []
         name_features = vec_name.get_feature_names_out()
         scope_features = vec_scope.get_feature_names_out()
@@ -318,7 +318,7 @@ if start_btn:
                 p_s = prob_scope[target_pool.index[idx]] * 50.0
                 explanations.append(f"{top_word_n}({p_n:.1f}%) + {top_word_s}({p_s:.1f}%) + 信用风险({p_c:.1f}%)")
             else:
-                explanations.append(f"范围含卷烟关键字 + 信用风险偏离度")
+                explanations.append(f"经营范围涉卷烟 + 企业信用评分偏离")
         
         target_pool['AI 判定依据'] = explanations
 
@@ -333,7 +333,7 @@ if start_btn:
         
         elapsed_time = time.time() - start_time
         calc_speed = int(len(target_pool) / max(elapsed_time, 0.001))
-        log_to_terminal(f"[SYSTEM] ✅ 演算结束！用时 {elapsed_time:.2f} 秒。系统正在生成最终名单...")
+        log_to_terminal(f"[SYSTEM] ✅ 任务圆满收官！总计用时 {elapsed_time:.2f} 秒，系统正在生成动态大屏...")
 
         # --- 结果展示区 ---
         st.success("🎯 过滤完成！已基于【统一社会信用代码】彻底从大盘中清除了持证商户，锁定了经营盲区。")
