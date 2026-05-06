@@ -42,13 +42,14 @@ title_font, label_font = get_chinese_font()
 # ==========================================
 # 1. NLP 预处理模块
 # ==========================================
+# 增加"许可项目","一般项目"等引导词屏蔽
 CUSTOM_STOP_WORDS = {
     '徐州','徐州市','江苏','江苏省','地址','未知','公司','店铺','个体','工商户',
     '商贸','企业','中心','工作室','经营部','销售部','市','省','区','县',
     '项目','活动','服务','管理','咨询','开发','贸易','代理','批发','零售','销售',
     '批零','兼营','制造','加工','用品','制品','器材','物资','产品','设备','科技',
     '发展','实业','经营','相关','业务','一般','许可','包含','商行','厂','店',
-    '提供','预包装','散装','其他','一切','合法'
+    '提供','预包装','散装','其他','一切','合法','许可项目','一般项目'
 }
 TOBACCO_WORDS = {'烟草','卷烟','雪茄','烟丝','香烟','电子烟','烟具','电子烟雾化物'}
 
@@ -157,7 +158,7 @@ def draw_analysis_charts(df, t_font, l_font):
 # ==========================================
 # 3. 核心加载逻辑与主程序
 # ==========================================
-st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 ")
+st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 (精简强效版)")
 
 with st.sidebar:
     st.header("📂 1. 数据接入库")
@@ -273,7 +274,7 @@ if start_btn:
         log_to_terminal(f"[FILTER] 最终锁定 {len(biz)} 家【范围涉烟，但未持证】的高危盲区，准备开展 AI 综合研判。")
 
         # --- 步骤 3 & 4 & 5: AI 概率预测演算 ---
-        log_to_terminal("[NLP] 启动强制文本降噪：粉碎“有限责任”、“个体工商户”等通用废话特征...")
+        log_to_terminal("[NLP] 启动强制文本降噪：剥离经营范围冗余括号、粉碎通用废话特征...")
         
         if not unl.empty:
             biz['label'], unl['label'] = 0, 1
@@ -283,9 +284,13 @@ if start_btn:
             biz['label'] = 0
             df_all = biz.copy()
 
+        # 🔴 【核弹级防干扰清洗】：删除括号及内部内容，删除废话公司后缀
+        bracket_regex = r'[（\(].*?[）\)]'
         garbage_regex = r'有限责任公司|有限公司|个体工商户|分公司|股份有限公司|有限|责任|股份'
+        
         df_all['清洗后名称'] = df_all['公司名称'].astype(str).str.replace(garbage_regex, '', regex=True)
-        df_all['清洗后范围'] = df_all['经营范围'].astype(str).str.replace(garbage_regex, '', regex=True)
+        # 先干掉括号及括号里的内容，再干掉废话词
+        df_all['清洗后范围'] = df_all['经营范围'].astype(str).str.replace(bracket_regex, '', regex=True).str.replace(garbage_regex, '', regex=True)
 
         log_to_terminal("[NLP] [公司名称] 执行 TF-IDF 多维向量化提取...")
         vec_name = TfidfVectorizer(tokenizer=custom_tokenizer, max_features=500)
@@ -324,8 +329,14 @@ if start_btn:
                 combined_prob = (prob_name * 0.30) + (prob_scope * 0.50) + (prob_credit * 0.20)
                 combined_prob = np.clip(combined_prob, 0, 0.99)
                 log_to_terminal(f"[ML-CORE] 激活智能概率放大器，最高风险目标已自动归一化逼近 {combined_prob[target_mask].max()*100:.1f}%。")
+            
+            # 将独立的维度概率保存回 df_all 中，以便后续提取 TOP 10 榜单
+            df_all['名称风险概率(%)'] = np.round(prob_name * 100, 2)
+            df_all['范围风险概率(%)'] = np.round(prob_scope * 100, 2)
         else:
-            combined_prob = prob_credit * 1.0  
+            combined_prob = prob_credit * 1.0
+            df_all['名称风险概率(%)'] = 0.0
+            df_all['范围风险概率(%)'] = 0.0
 
         df_all['无证户综合概率(%)'] = np.round(combined_prob * 100, 2)
         target_pool = df_all[df_all['label'] == 0].copy()
@@ -356,6 +367,7 @@ if start_btn:
             orig_credit = target_pool.iloc[idx]['信用值']
             p_c = prob_credit[target_pool.index[idx]] * 20.0
             
+            # 🔴 精简清爽的输出格式
             if not unl.empty:
                 p_n = prob_name[target_pool.index[idx]] * 30.0
                 p_s = prob_scope[target_pool.index[idx]] * 50.0
@@ -406,7 +418,7 @@ if start_btn:
                 
                 **各因素量化贡献拆解 (权重 30%-50%-20%)：**
                 * **1. 公司名称词簇 (28.4/30.0)**：AI 提取高危特征组合 `[百货+副食]`。系统按 30% 权重折算贡献度为 28.4%。
-                * **2. 业务实质词簇 (45.1/50.0)**：排除了通用的“销售/零售”等废话，抓取到了核心业务特征簇 `[日用+食品+散装]`。系统按 50% 权重折算贡献度为 45.1%。
+                * **2. 业务实质词簇 (45.1/50.0)**：删除了带有冗余括号的法律限定词及通用行业废话，抓取到核心业务特征簇 `[日用+食品+散装]`。系统按 50% 权重折算贡献度为 45.1%。
                 * **3. 信用分偏离 (19.0/20.0)**：利用高斯混合模型，测算“42分”属于低分高危群体的分布概率，按 20% 权重折算为 19.0%。
                 * **综合判定公式**：$28.4 + 45.1 + 19.0 = 92.5$。得出最终概率为92.5%。
                 """)
@@ -416,7 +428,7 @@ if start_btn:
             #### 📚 核心专业名词解释与底层计算公式
             
             **1. TF-IDF (词频-逆向文档频率)**
-            * **原理说明**：用于评估一个词语对于一个企业信息（如经营范围）的重要程度。如果某个词汇在当前商户中频繁出现（TF高），但在全网大盘中很少出现（IDF高），则该词具有极高的区分度，会被赋予高权重。模型通过此技术精准锁定“卷烟”、“副食”等关键业务特征，自动过滤“有限责任”、“批发”等通用废话。
+            * **原理说明**：用于评估一个词语对于一个企业信息（如经营范围）的重要程度。如果某个词汇在当前商户中频繁出现（TF高），但在全网大盘中很少出现（IDF高），则该词具有极高的区分度，会被赋予高权重。模型通过此技术精准锁定关键业务特征，自动过滤通用废话。
             * **底层公式**：
               $$TF(t, d) = \frac{词 t 在文档 d 中出现的次数}{文档 d 的总词数}$$
               $$IDF(t, D) = \log\left(\frac{语料库的文档总数 N}{包含词 t 的文档数 + 1}\right)$$
@@ -428,10 +440,9 @@ if start_btn:
               $$P_{RF}(x) = \frac{1}{N} \sum_{i=1}^{N} P_i(x)$$
 
             **3. GMM (高斯混合模型 - 信用分概率映射)**
-            * **原理说明**：一种无监督的概率聚类模型。直接使用天眼查信用分会带来线性误差（比如40分和50分在风险上可能并无区别）。GMM 自动将全网信用分拟合为两个交叠的“钟形曲线”（正态分布）：一个代表“高分正常群体”，一个代表“低分高危群体”。输入一个分数后，GMM 会通过贝叶斯定理计算该分数“属于高危分布群体”的真实条件概率。
+            * **原理说明**：一种无监督的概率聚类模型。直接使用天眼查信用分会带来线性误差。GMM 自动将全网信用分拟合为两个交叠的“钟形曲线”：一个代表“高分正常群体”，一个代表“低分高危群体”。输入一个分数后，GMM 会通过贝叶斯定理计算该分数“属于高危分布群体”的真实条件概率。
             * **底层公式**：数据 $x$ 的总体概率密度为 $K$ 个高斯分布的加权和：
               $$p(x) = \sum_{k=1}^{K} \pi_k \mathcal{N}(x | \mu_k, \Sigma_k)$$
-              （其中 $K=2$，分别代表高低风险簇，$\pi_k$ 为混合权重，$\mu_k$ 为均值，$\Sigma_k$ 为方差）
               
             **4. 动态概率放大器 (自适应归一化)**
             * **原理说明**：由于真实世界中无证户占比极低（数据极度不平衡），随机森林算法在打分时会趋于保守（例如大盘最高风险户的理论概率可能只有 30%）。为了符合稽查人员的直觉并触发红线预警，系统设计了自适应放大器：动态寻获当前大盘的最大风险值 $P_{max}$，并按比例将概率张量整体拉伸，使极高风险群体逼近 95% 以上，且绝对不改变商户之间的相对排名先后。
@@ -440,7 +451,7 @@ if start_btn:
             """)
 
         # --- 打击名单 ---
-        st.subheader("🚨 打击名单 TOP 20（Strike List TOP 20 按风险度排序）")
+        st.subheader("🚨 智能稽查打击名单（按综合风险度排序）")
         display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', 'AI 判定依据', '风险等级', '监管建议', '法定代表人']
         
         if '注册地址' in target_pool.columns:
@@ -456,6 +467,29 @@ if start_btn:
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             target_pool[display_cols].to_excel(writer, index=False)
         st.download_button("📥 导出最终【有烟无证】稽查名单", buffer, "有烟无证盲区_精准排查名单.xlsx", "application/vnd.ms-excel")
+
+        # 🔴【新增】：双维度 TOP 10 榜单
+        st.divider()
+        st.subheader("🏆 单维特征高危 TOP 10 榜单 (AI 独立切片分析)")
+        col_top_name, col_top_scope = st.columns(2)
+        
+        with col_top_name:
+            st.markdown("#### 📛 企业名称高危 TOP 10")
+            if not unl.empty:
+                # 去除重复的名称，按名称预测概率从高到低排序
+                top_names = target_pool[['公司名称', '名称风险概率(%)']].drop_duplicates(subset=['公司名称']).sort_values('名称风险概率(%)', ascending=False).head(10)
+                st.dataframe(top_names.style.format({"名称风险概率(%)": "{:.2f}%"}), use_container_width=True)
+            else:
+                st.info("缺乏无证户历史数据，未激活名称预测")
+
+        with col_top_scope:
+            st.markdown("#### 📜 经营范围高危 TOP 10")
+            if not unl.empty:
+                # 去除重复的经营范围，按范围预测概率从高到低排序
+                top_scopes = target_pool[['经营范围', '范围风险概率(%)']].drop_duplicates(subset=['经营范围']).sort_values('范围风险概率(%)', ascending=False).head(10)
+                st.dataframe(top_scopes.style.format({"范围风险概率(%)": "{:.2f}%"}), use_container_width=True)
+            else:
+                st.info("缺乏无证户历史数据，未激活范围预测")
 
         st.divider()
         draw_analysis_charts(target_pool, title_font, label_font)
