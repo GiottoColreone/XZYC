@@ -140,12 +140,15 @@ def draw_analysis_charts(df, t_font, l_font):
 # ==========================================
 # 3. 核心加载逻辑与主程序
 # ==========================================
-st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 (30-50-20加权版)")
+st.title("👁️ 卷烟无证经营户动态筛查 AI 模型 (白名单剥离版)")
 
 with st.sidebar:
     st.header("📂 1. 数据接入库")
     file_biz_list = st.file_uploader("上传【营业执照】名单 (支持多选)", type=["xlsx", "csv"], accept_multiple_files=True)
     file_unl_list = st.file_uploader("上传【历史无证户】名单 (支持多选)", type=["xlsx", "csv"], accept_multiple_files=True)
+    # 【新增功能】：持证户白名单上传入口
+    file_lic_list = st.file_uploader("上传【现有持证户】名单 (支持多选 / 自动白名单剔除)", type=["xlsx", "csv"], accept_multiple_files=True)
+    st.info("💡 提示：上传“现有持证户”名单后，系统会自动在营业执照中剔除这些合法商户，仅对无证群体进行计算。")
     start_btn = st.button("🚀 2. 启动 AI 深度筛查演算", type="primary", use_container_width=True)
 
 # 辅助函数：处理多个上传文件的合并与天眼查格式适配
@@ -176,7 +179,7 @@ if start_btn:
         st.warning("⚠️ 权限阻断：请先在左侧分别上传至少一个营业执照和历史无证户数据文件！")
     else:
         st.markdown("### 💻 系统核心演算终端")
-        log_container = st.container(height=300)
+        log_container = st.container(height=350)
         terminal = log_container.empty()
         log_lines = []
         
@@ -194,7 +197,12 @@ if start_btn:
         log_to_terminal("[SYSTEM] 分配核心内存空间，执行多文件数据流合并...")
         biz = load_uploaded_files(file_biz_list)
         unl = load_uploaded_files(file_unl_list)
-        log_to_terminal(f"[DATA] 数据加载完毕。合并后营业执照 {len(biz)} 条，无证卷宗 {len(unl)} 条。")
+        lic = load_uploaded_files(file_lic_list) if file_lic_list else pd.DataFrame() # 加载持证户
+        
+        log_msg = f"[DATA] 数据加载完毕。合并后营业执照 {len(biz)} 条，无证卷宗 {len(unl)} 条"
+        if not lic.empty: log_msg += f"，持证白名单 {len(lic)} 条。"
+        else: log_msg += "。"
+        log_to_terminal(log_msg)
 
         # --- 步骤 2: 数据清洗与对齐 (防崩溃补全机制) ---
         log_to_terminal("[CLEAN] 启动数据清洗管线，进行防崩溃字段检测与强制补全...")
@@ -209,13 +217,33 @@ if start_btn:
         for col, default_val in required_cols.items():
             if col not in biz.columns: biz[col] = default_val
             if col not in unl.columns: unl[col] = default_val
+            if not lic.empty and col not in lic.columns: lic[col] = default_val
                 
         biz = biz.fillna(required_cols)
         unl = unl.fillna(required_cols)
+        if not lic.empty: lic = lic.fillna(required_cols)
         
         # 安全转数字
         biz['信用值'] = pd.to_numeric(biz['信用值'], errors='coerce').fillna(0)
         unl['信用值'] = pd.to_numeric(unl['信用值'], errors='coerce').fillna(0)
+
+        # --- 步骤 2.5: 【新增模块】持证户白名单剔除 ---
+        if not lic.empty:
+            log_to_terminal("[FILTER] 启动持证户白名单防御模块，正在执行双键（名称/信用代码）精准碰撞...")
+            # 提取有效的持证户名称和信用代码（过滤掉默认的未知和空值）
+            licensed_names = set(lic[lic['公司名称'] != '未知']['公司名称'].dropna().unique())
+            licensed_codes = set(lic[lic['统一社会信用代码'] != '未知']['统一社会信用代码'].dropna().unique())
+            
+            orig_biz_len = len(biz)
+            
+            # 核心过滤逻辑：如果待查商户的【名称】或【信用代码】存在于持证户列表中，则将其剔除
+            biz = biz[~(biz['公司名称'].isin(licensed_names) | biz['统一社会信用代码'].isin(licensed_codes))]
+            
+            filtered_count = orig_biz_len - len(biz)
+            log_to_terminal(f"[FILTER] 🟢 碰撞清洗完毕！已成功从待查营业执照中安全剥离 {filtered_count} 家已知合法持证商户。")
+            log_to_terminal(f"[FILTER] 剩余 {len(biz)} 家无证（或存疑）商户，即将对其开展 AI 核心排查演算。")
+        else:
+            log_to_terminal("[FILTER] ⚠️ 未检测到【现有持证户】数据上传，跳过白名单剥离模块，将对全量营业执照进行风险预测。")
 
         # --- 步骤 3: 实体特征提取与法人比对 ---
         log_to_terminal("[GRAPH] 正在从历史档案提取核心实体，执行跨表网络穿透比对...")
@@ -302,14 +330,14 @@ if start_btn:
         log_to_terminal(f"[SYSTEM] ✅ 演算结束！用时 {elapsed_time:.2f} 秒。系统正在生成大屏...")
 
         # --- 结果展示区 ---
-        st.success("🎯 稽查演算收官！已基于指定权重 (30:50:20) 及 GMM 模型完成概率映射。")
+        st.success("🎯 稽查演算收官！已成功剔除合法持证户，并针对高危人群完成 GMM 概率映射。")
         m1, m2, m3, m4 = st.columns(4)
         total = len(target_pool)
         
-        m1.metric("极高风险数量 (80%-100%)", f"{len(target_pool[target_pool['风险等级']=='极高风险'])} 家", f"占总体 {len(target_pool[target_pool['风险等级']=='极高风险'])/total*100:.2f}%" if total >0 else "0%")
-        m2.metric("高风险数量 (60%-79%)", f"{len(target_pool[target_pool['风险等级']=='高风险'])} 家", f"占总体 {len(target_pool[target_pool['风险等级']=='高风险'])/total*100:.2f}%" if total >0 else "0%")
-        m3.metric("中风险数量 (35%-59%)", f"{len(target_pool[target_pool['风险等级']=='中风险'])} 家", f"占总体 {len(target_pool[target_pool['风险等级']=='中风险'])/total*100:.2f}%" if total >0 else "0%")
-        m4.metric("全网核查总规模", f"{total} 条", f"AI筛查时效: 极速 ({calc_speed} 条/秒)")
+        m1.metric("极高风险数量 (80%-100%)", f"{len(target_pool[target_pool['风险等级']=='极高风险'])} 家", f"占剥离后总量 {len(target_pool[target_pool['风险等级']=='极高风险'])/total*100:.2f}%" if total >0 else "0%")
+        m2.metric("高风险数量 (60%-79%)", f"{len(target_pool[target_pool['风险等级']=='高风险'])} 家", f"占剥离后总量 {len(target_pool[target_pool['风险等级']=='高风险'])/total*100:.2f}%" if total >0 else "0%")
+        m3.metric("中风险数量 (35%-59%)", f"{len(target_pool[target_pool['风险等级']=='中风险'])} 家", f"占剥离后总量 {len(target_pool[target_pool['风险等级']=='中风险'])/total*100:.2f}%" if total >0 else "0%")
+        m4.metric("锁定排查总规模", f"{total} 条", f"AI筛查时效: 极速 ({calc_speed} 条/秒)")
 
         st.divider()
 
@@ -334,13 +362,14 @@ if start_btn:
             st.markdown("---")
             st.markdown(r"""
             #### 📚 核心专业名词解释与底层计算公式
+            * **白名单防御 (过滤模块)**：上传持证户表格后，系统会提取【公司名称】与【统一社会信用代码】，只要营业执照底册中匹配到任意一项，就会将其标记为“合法商户”并剔除，节约稽查算力。
             * **GMM (高斯混合模型)**：一种无监督的概率聚类模型。系统将所有店铺的信用分输入模型，自动拟合出两个正态（高斯）分布的曲线——一根代表“高分正常群体”，一根代表“低分异常群体”。当输入一个具体分数时，GMM 会计算该分数“属于低分异常群体”的数学概率，这比直接对分数做线性相减更加科学平滑。
             * **权重分配体系**：根据业务经验对模型决策进行干预。当前版本设定：**公司名称 30%，经营范围（业务实质） 50%，第三方信用 20%**。
             * **TF-IDF 与 随机森林**：名称和范围仍通过计算词频与逆文档频率，喂入随机森林产生基于文本的分类概率。
             """)
 
         # --- 打击名单 ---
-        st.subheader("🚨 打击名单 TOP 20（风险度从高到低排序）")
+        st.subheader("🚨 稽查排查名单 TOP 20（风险度从高到低排序，已剔除白名单）")
         display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', 'AI 判定依据', '风险等级', '监管建议', '法定代表人', '该商户负责人是否在无证户名录（可能重名）']
         
         if '注册地址' in target_pool.columns:
@@ -355,7 +384,7 @@ if start_btn:
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             target_pool[display_cols].to_excel(writer, index=False)
-        st.download_button("📥 导出全量名单", buffer, "天眼查风险名单_新算法版.xlsx", "application/vnd.ms-excel")
+        st.download_button("📥 导出最终排查名单 (已脱敏)", buffer, "天眼查风险排查名单_清洗剥离版.xlsx", "application/vnd.ms-excel")
 
         st.divider()
         draw_analysis_charts(target_pool, title_font, label_font)
