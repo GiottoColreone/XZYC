@@ -165,7 +165,7 @@ with st.sidebar:
     file_lic_list = st.file_uploader("1️⃣ 上传【持证户名录】", type=["xlsx", "csv"], accept_multiple_files=True)
     file_unl_list = st.file_uploader("2️⃣ 上传【无证户名录】 ", type=["xlsx", "csv"], accept_multiple_files=True)
     file_biz_list = st.file_uploader("3️⃣ 上传【营业执照名录】", type=["xlsx", "csv"], accept_multiple_files=True)
-    st.info("💡 核心逻辑：基于统一社会信用代码进行匹配，从大盘名单中剥离持证户，留下【范围有烟但无证】的高危盲区。")
+    st.info("💡 核心逻辑：基于统一社会信用代码进行匹配，从大盘名单中剥离持证户，留下【经营范围有烟但无烟草证】的商户，分析现有无证户特征进行建模，筛选商户。")
     start_btn = st.button("🚀 2. 启动深度筛查演算", type="primary", use_container_width=True)
 
 def load_uploaded_files(file_list):
@@ -254,7 +254,7 @@ if start_btn:
         # ==============================================================
         # --- 步骤 2.5: 【核心逻辑】基于统一社会信用代码剔除已持证户 ---
         # ==============================================================
-        log_to_terminal("[FILTER] 启动核心漏斗逻辑：【营业执照名录】 - 【持证库】 = 疑似无证盲区...")
+        log_to_terminal("[FILTER] 启动核心逻辑：【营业执照名录】 - 【持证库】 = 【目标名录】...")
         
         invalid_strs = {'未知', '', 'NAN', 'NAT', 'NONE', '无'}
 
@@ -271,7 +271,7 @@ if start_btn:
         
         filtered_count = orig_biz_len - len(biz)
         log_to_terminal(f"[FILTER] 🟢 过滤成功！基于唯一信用代码，已从大盘中精准剔除 {filtered_count} 家商户。")
-        log_to_terminal(f"[FILTER] 最终锁定 {len(biz)} 家【范围涉烟，但未持证】的高危盲区，准备开展综合研判。")
+        log_to_terminal(f"[FILTER] 最终锁定 {len(biz)} 家【经营范围涉烟，但未持烟草证】商户，准备开展综合研判。")
 
         # --- 步骤 3 & 4 & 5: 概率预测演算 ---
         log_to_terminal("[NLP] 启动强制文本降噪：剥离经营范围冗余括号、粉碎通用废话特征...")
@@ -279,7 +279,7 @@ if start_btn:
         if not unl.empty:
             biz['label'], unl['label'] = 0, 1
             df_all = pd.concat([unl, biz], ignore_index=True)
-            log_to_terminal("[GRAPH] 已加载无证户作为黑样本标签，准备开展监督学习。")
+            log_to_terminal("[GRAPH] 已加载无证户作为样本标签，准备开展机器学习。")
         else:
             biz['label'] = 0
             df_all = biz.copy()
@@ -375,7 +375,7 @@ if start_btn:
                 explanations.append(f"[{top_words_n}] + [{top_words_s}] + 信用偏离")
         
         target_pool['判定依据'] = explanations
-        log_to_terminal("[EXPLAINER] 多维特征组合溯源解析完成，违规证据链已封装。")
+        log_to_terminal("[EXPLAINER] 多维特征组合溯源解析完成，内容已封装。")
 
         # --- 风险定级 ---
         def assign_risk(p):
@@ -391,7 +391,7 @@ if start_btn:
         log_to_terminal(f"[SYSTEM] ✅ 任务圆满收官！总计用时 {elapsed_time:.2f} 秒，系统正在生成动态大屏...")
 
         # --- 结果展示区 ---
-        st.success("🎯 过滤完成！已基于【统一社会信用代码】彻底从大盘中清除了持证商户，锁定了经营盲区。")
+        st.success("🎯 过滤完成！已基于【统一社会信用代码】彻底从大盘中清除了持证商户，锁定了最终名录。")
         m1, m2, m3, m4 = st.columns(4)
         total = len(target_pool)
         
@@ -424,7 +424,7 @@ if start_btn:
                 """)
 
         # --- 打击名单 ---
-        st.subheader("🚨 打击名单 TOP 20（Strike List TOP 20 按风险度排序）")
+        st.subheader("🚨 重点名单 TOP 20（按风险度排序）")
         display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', '判定依据', '风险等级', '监管建议', '法定代表人']
         
         if '注册地址' in target_pool.columns:
@@ -439,19 +439,19 @@ if start_btn:
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             target_pool[display_cols].to_excel(writer, index=False)
-        st.download_button("📥 导出最终【有烟无证】稽查名单", buffer, "有烟无证盲区_精准排查名单.xlsx", "application/vnd.ms-excel")
+        st.download_button("📥 导出全部名单", buffer, "精准排查名单.xlsx", "application/vnd.ms-excel")
 
         # ==============================================================
         # 🔴【新增】：双维度 分词概率 TOP 10 榜单 (真实测算单一特征高危概率)
         # ==============================================================
         st.divider()
         st.subheader("🏆 核心分词概率 TOP 10 榜单 ")
-        st.caption("以下榜单展示的是：当一个企业的名字或范围中**仅仅命中该词**时，模型给出的独立高危概率。")
+        st.caption("以下榜单展示的是：当一个企业的名字或范围中**仅仅命中该词**时，模型给出的独立概率。")
         
         col_top_name, col_top_scope = st.columns(2)
         
         with col_top_name:
-            st.markdown("#### 📛 企业名称高危分词 TOP 10")
+            st.markdown("#### 📛 企业名称分词 TOP 10")
             if not unl.empty:
                 importances_n = model_name.feature_importances_
                 word_data_n = []
@@ -473,7 +473,7 @@ if start_btn:
                 st.info("缺乏无证户历史数据，未激活分词概率分析")
 
         with col_top_scope:
-            st.markdown("#### 📜 经营范围高危分词 TOP 10")
+            st.markdown("#### 📜 经营范围分词 TOP 10")
             if not unl.empty:
                 importances_s = model_scope.feature_importances_
                 word_data_s = []
