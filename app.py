@@ -40,7 +40,7 @@ def get_chinese_font():
 title_font, label_font = get_chinese_font()
 
 # ==========================================
-# 1. NLP 预处理模块
+# 1. NLP 预处理模块 (升级组合分词机制)
 # ==========================================
 CUSTOM_STOP_WORDS = {
     '徐州','徐州市','江苏','江苏省','地址','未知','公司','店铺','个体','工商户',
@@ -56,11 +56,24 @@ TOBACCO_WORDS = {'烟草','卷烟','雪茄','烟丝','香烟','电子烟','烟�
 def custom_tokenizer(text):
     if not isinstance(text, str) or not text: return []
     norm_map = {'百货店':'百货','百货商场':'百货','百货公司':'百货','百货超市':'百货','便利店':'便利'}
-    words = jieba.lcut(text)
     
+    # 1. 基础分词
+    raw_words = jieba.lcut(text)
+    
+    # 2. 过滤掉标点符号等无意义字符，只保留纯文字
+    valid_words = [norm_map.get(w, w) for w in raw_words if re.match(r'^[\u4e00-\u9fa5a-zA-Z0-9]+$', w)]
+    
+    # 3. 扩充分词规模 (N-gram)：提取单词的同时，将相邻的两个有效词组合
+    # 例如："食品" + "销售" = "食品销售"
+    tokens = []
+    for i in range(len(valid_words)):
+        tokens.append(valid_words[i])
+        if i > 0:
+            tokens.append(valid_words[i-1] + valid_words[i])
+            
     processed_words = []
-    for w in words:
-        w = norm_map.get(w, w)
+    for w in tokens:
+        # 如果长度>1且不在停用词字典内，则保留 (这完美解决了"销售"被去，但"食品销售"被保留的需求)
         if len(w) > 1 and w not in CUSTOM_STOP_WORDS and not any(tob in w for tob in TOBACCO_WORDS):
             processed_words.append(w)
     return processed_words
@@ -308,23 +321,27 @@ if start_btn:
 
         log_to_terminal("[ML-CORE] 正在执行三权融合决策 (名称30% | 范围50% | 信用20%)...")
         
-        # 全局动态缩放因子（确保概率榜单和企业得分能达到90%以上的高危红线）
         scale_factor = 1.0  
         
         if not unl.empty:
-            # 加入 class_weight='balanced' 纠正概率极小的问题
             model_name = RandomForestClassifier(n_estimators=100, max_depth=None, class_weight='balanced', random_state=42).fit(X_name, df_all['label'])
             prob_name = model_name.predict_proba(X_name)[:, 1]
             
             model_scope = RandomForestClassifier(n_estimators=100, max_depth=None, class_weight='balanced', random_state=42).fit(X_scope, df_all['label'])
             prob_scope = model_scope.predict_proba(X_scope)[:, 1]
+
+            # --- 【核心熔断机制】：强制降低提取不到特征商户的预测概率 ---
+            empty_n_mask = np.array((X_name.sum(axis=1) == 0)).flatten()
+            empty_s_mask = np.array((X_scope.sum(axis=1) == 0)).flatten()
+            prob_name[empty_n_mask] = 0.05  # 降至极低风险底线
+            prob_scope[empty_s_mask] = 0.05
+            # ------------------------------------------------------------
             
             combined_prob = (prob_name * 0.30) + (prob_scope * 0.50) + (prob_credit * 0.20)
             
             target_mask = df_all['label'] == 0
             max_p = combined_prob[target_mask].max() if target_mask.any() else combined_prob.max()
             
-            # 【动态概率放大器】如果大盘最高风险依然被压制在 92% 以下，则整体按比例放大
             if max_p > 0 and max_p < 0.92:
                 scale_factor = 0.95 / max_p
                 prob_name *= scale_factor
@@ -340,7 +357,7 @@ if start_btn:
         df_all['无证户综合概率(%)'] = np.round(combined_prob * 100, 2)
         target_pool = df_all[df_all['label'] == 0].copy()
         
-        # --- 步骤 6: 白盒归因 (🔴 极致精简版：仅说内容) ---
+        # --- 步骤 6: 白盒归因 ---
         log_to_terminal("[EXPLAINER] 激活解释器，追踪高危特征词簇组合...")
         
         def extract_top_k_words(row_vector, features, top_k):
@@ -366,7 +383,6 @@ if start_btn:
             orig_credit = target_pool.iloc[idx]['信用值']
             p_c = prob_credit[target_pool.index[idx]] * 20.0
             
-            # 【完美精简的输出格式】
             if not unl.empty:
                 p_n = prob_name[target_pool.index[idx]] * 30.0
                 p_s = prob_scope[target_pool.index[idx]] * 50.0
@@ -456,11 +472,10 @@ if start_btn:
                 importances_n = model_name.feature_importances_
                 word_data_n = []
                 for i, word in enumerate(name_features):
-                    if importances_n[i] > 0.001:  # 仅筛选有权重的特征词
-                        # 构建一个只包含这个词的假样本，测算其独立概率并同步放大比例
+                    if importances_n[i] > 0.001:  
                         vec = vec_name.transform([word])
                         prob = model_name.predict_proba(vec)[0, 1] * scale_factor * 100
-                        prob = min(prob, 99.0) # 封顶99%
+                        prob = min(prob, 99.0) 
                         word_data_n.append({'核心特征词': word, '命中该词的违规概率': prob})
                 
                 if word_data_n:
