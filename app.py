@@ -40,7 +40,7 @@ def get_chinese_font():
 title_font, label_font = get_chinese_font()
 
 # ==========================================
-# 1. NLP 预处理模块 (极限性能重构版)
+# 1. NLP 预处理模块
 # ==========================================
 CUSTOM_STOP_WORDS = {
     '徐州','徐州市','江苏','江苏省','地址','未知','公司','店铺','个体','工商户',
@@ -54,35 +54,25 @@ CUSTOM_STOP_WORDS = {
     '开发区','高新区','新区','新城','新城区','老城区','街道','社区','办事处','山区'
 }
 
-# 【提速优化1】预编译正则表达式，避免循环中重复编译，性能提升巨量
 VALID_WORD_PATTERN = re.compile(r'^[\u4e00-\u9fa5a-zA-Z0-9]+$')
 
 def custom_tokenizer(text):
     if not isinstance(text, str) or not text: return []
-    
-    # 1. 基础分词
     raw_words = jieba.lcut(text)
     
-    # 2. 纯净有效词提取与替换映射
     valid_words = []
     for w in raw_words:
         if w in {'百货店','百货商场','百货公司','百货超市'}: w = '百货'
         elif w == '便利店': w = '便利'
-        
-        # 只保留有意义的中英文数字字符
         if VALID_WORD_PATTERN.match(w):
             valid_words.append(w)
             
-    # 3. N-gram 组合与极速过滤
     processed_words = []
     for i in range(len(valid_words)):
         w1 = valid_words[i]
-        
-        # 【提速优化2】抛弃 any() 循环，使用最底层的纯字符串判断，提速 100 倍
         if len(w1) > 1 and w1 not in CUSTOM_STOP_WORDS and not ('烟' in w1 or '雪茄' in w1):
             processed_words.append(w1)
             
-        # N-Gram 相邻词组合 (保留类似 "食品销售" 的高价值组合)
         if i > 0:
             w2 = valid_words[i-1] + w1
             if w2 not in CUSTOM_STOP_WORDS and not ('烟' in w2 or '雪茄' in w2):
@@ -231,7 +221,6 @@ if start_btn:
 
         start_time = time.time()
 
-        # --- 步骤 1: 数据加载 ---
         log_to_terminal("[SYSTEM] 正在初始化天眼稽查引擎，读取异构数据源...")
         log_to_terminal("[SYSTEM] 分配核心内存空间，执行多文件数据流合并...")
         lic = load_uploaded_files(file_lic_list)
@@ -240,7 +229,6 @@ if start_btn:
         
         log_to_terminal(f"[DATA] 数据加载完毕。大盘执照 {len(biz)} 条，持证库 {len(lic)} 条，历史无证 {len(unl)} 条。")
 
-        # --- 步骤 2: 底层数据清洗与表头对齐 ---
         log_to_terminal("[CLEAN] 启动底层数据清洗管线：对齐异构表头并强制规范化...")
         
         for df_temp in [biz, unl, lic]:
@@ -276,9 +264,6 @@ if start_btn:
         
         log_to_terminal("[CLEAN] 缺失值探测完毕，已安全将异常信用分转换为纯数字类型。")
 
-        # ==============================================================
-        # --- 步骤 2.5: 【核心逻辑】基于统一社会信用代码剔除已持证户 ---
-        # ==============================================================
         log_to_terminal("[FILTER] 启动核心逻辑：【营业执照名录】 - 【持证库】 = 【目标名录】...")
         
         invalid_strs = {'未知', '', 'NAN', 'NAT', 'NONE', '无'}
@@ -298,7 +283,6 @@ if start_btn:
         log_to_terminal(f"[FILTER] 🟢 过滤成功！基于唯一信用代码，已从大盘中精准剔除 {filtered_count} 家商户。")
         log_to_terminal(f"[FILTER] 最终锁定 {len(biz)} 家【经营范围涉烟，但未持烟草证】商户，准备开展综合研判。")
 
-        # --- 步骤 3 & 4 & 5: 概率预测演算 ---
         log_to_terminal("[NLP] 启动强制文本降噪：剥离经营范围冗余括号、粉碎通用废话特征...")
         
         if not unl.empty:
@@ -309,7 +293,6 @@ if start_btn:
             biz['label'] = 0
             df_all = biz.copy()
 
-        # 删除所有括号（及内部法律条文）、删除无意义公司后缀
         bracket_regex = r'[（\(].*?[）\)]'
         garbage_regex = r'有限责任公司|有限公司|个体工商户|分公司|股份有限公司|有限|责任|股份'
         
@@ -331,7 +314,7 @@ if start_btn:
         risk_component_idx = np.argmin(gmm.means_.flatten())
         prob_credit = gmm.predict_proba(credit_values)[:, risk_component_idx]
 
-        log_to_terminal("[ML-CORE] 正在执行三权融合决策 (名称30% | 范围50% | 信用20%)...")
+        log_to_terminal("[ML-CORE] 正在执行非线性概率拉升与特征融合 (名称30% | 范围50% | 信用20%)...")
         
         scale_factor = 1.0  
         
@@ -342,38 +325,51 @@ if start_btn:
             model_scope = RandomForestClassifier(n_estimators=100, max_depth=None, class_weight='balanced', random_state=42).fit(X_scope, df_all['label'])
             prob_scope = model_scope.predict_proba(X_scope)[:, 1]
 
-            # --- 【核心熔断机制】：强制降低提取不到特征商户的预测概率 ---
             empty_n_mask = np.array((X_name.sum(axis=1) == 0)).flatten()
             empty_s_mask = np.array((X_scope.sum(axis=1) == 0)).flatten()
-            prob_name[empty_n_mask] = 0.05  
-            prob_scope[empty_s_mask] = 0.05
+            prob_name[empty_n_mask] = 0.02  
+            prob_scope[empty_s_mask] = 0.02
             
-            # 业务实质一票否决：如果经营范围风险极低（< 15%），说明它卖的东西大概率和快消品无关
             veto_mask = prob_scope < 0.15
             prob_name[veto_mask] = prob_name[veto_mask] * 0.1
-            # ------------------------------------------------------------
             
-            combined_prob = (prob_name * 0.30) + (prob_scope * 0.50) + (prob_credit * 0.20)
+            # =========================================================
+            # 🔴【全新核心优化：非线性开方平滑算法】
+            # =========================================================
+            # 利用平滑开方技术，将原本被随机森林压制的极低概率非线性拉伸
+            # 彻底解决大盘极不平衡导致的中高层梯队断层问题
+            prob_name_smooth = np.sqrt(prob_name)
+            prob_scope_smooth = np.sqrt(prob_scope)
+            
+            combined_prob = (prob_name_smooth * 0.30) + (prob_scope_smooth * 0.50) + (prob_credit * 0.20)
             
             target_mask = df_all['label'] == 0
             max_p = combined_prob[target_mask].max() if target_mask.any() else combined_prob.max()
             
-            if max_p > 0 and max_p < 0.92:
-                scale_factor = 0.95 / max_p
-                prob_name *= scale_factor
-                prob_scope *= scale_factor
-                prob_credit *= scale_factor
+            if max_p > 0 and max_p < 0.96:
+                scale_factor = 0.96 / max_p
+                # 同步放大独立组件，确保归因展示金额逻辑一致
+                prob_name_smooth *= scale_factor
+                prob_scope_smooth *= scale_factor
+                prob_credit_smooth = prob_credit * scale_factor
                 
-                combined_prob = (prob_name * 0.30) + (prob_scope * 0.50) + (prob_credit * 0.20)
+                combined_prob = (prob_name_smooth * 0.30) + (prob_scope_smooth * 0.50) + (prob_credit_smooth * 0.20)
                 combined_prob = np.clip(combined_prob, 0, 0.99)
-                log_to_terminal(f"[ML-CORE] 激活智能概率放大器，最高风险目标已自动归一化逼近 {combined_prob[target_mask].max()*100:.1f}%。")
+                log_to_terminal(f"[ML-CORE] 激活非线性平滑放大器，高低危梯队已被完美重塑展开。")
+            else:
+                prob_credit_smooth = prob_credit
+                
+            # 将平滑处理后的概率覆盖原变量，接入解释器
+            prob_name = prob_name_smooth
+            prob_scope = prob_scope_smooth
+            prob_credit = prob_credit_smooth
+
         else:
             combined_prob = prob_credit * 1.0  
 
         df_all['无证户综合概率(%)'] = np.round(combined_prob * 100, 2)
         target_pool = df_all[df_all['label'] == 0].copy()
         
-        # --- 步骤 6: 白盒归因 ---
         log_to_terminal("[EXPLAINER] 激活解释器，追踪高危特征词簇组合...")
         
         def extract_top_k_words(row_vector, features, top_k):
@@ -409,7 +405,6 @@ if start_btn:
         target_pool['判定依据'] = explanations
         log_to_terminal("[EXPLAINER] 多维特征组合溯源解析完成，内容已封装。")
 
-        # --- 风险定级 ---
         def assign_risk(p):
             if p >= 80: return '极高风险', '🚨 立即排查'
             elif p >= 60: return '高风险', '⚠️ 重点监控'
@@ -422,7 +417,6 @@ if start_btn:
         calc_speed = int(len(target_pool) / max(elapsed_time, 0.001))
         log_to_terminal(f"[SYSTEM] ✅ 任务圆满收官！总计用时 {elapsed_time:.2f} 秒，系统正在生成动态大屏...")
 
-        # --- 结果展示区 ---
         st.success("🎯 过滤完成！已基于【统一社会信用代码】彻底从大盘中清除了持证商户，锁定了最终名录。")
         m1, m2, m3, m4 = st.columns(4)
         total = len(target_pool)
@@ -459,12 +453,10 @@ if start_btn:
             st.markdown(r"""
             #### 📚 核心专业名词解释与底层计算公式
             
-            **1. TF-IDF (词频-逆向文档频率)**
-            * **原理说明**：用于评估一个词语对于一个企业信息（如经营范围）的重要程度。模型通过此技术精准锁定关键业务特征，自动过滤通用废话。
+            **1. 非线性开方平滑算法 (Square Root Smoothing)**
+            * **原理说明**：由于大盘数据中合规商户占比极高（>99%），会导致 AI 算法出现严重的“概率压制”（得分扎堆在 10% 左右低分段）。模型引入非线性平滑机制，就像显微镜一样，将原本压缩在底部的异常概率非线性拉伸放大（如 $16\%$ 拉升至 $40\%$），从而完美重塑层级分明的中高危梯队。
             * **底层公式**：
-              $$TF(t, d) = \frac{词 t 在文档 d 中出现的次数}{文档 d 的总词数}$$
-              $$IDF(t, D) = \log\left(\frac{语料库的文档总数 N}{包含词 t 的文档数 + 1}\right)$$
-              $$TF\text{-}IDF = TF \times IDF$$
+              $$P_{smooth} = \sqrt{P_{original}}$$
               
             **2. Random Forest (随机森林分类算法)**
             * **原理说明**：一种集成机器学习算法。系统在底层构建了上百棵相互独立的“决策树”（Decision Trees）。每棵树都会根据商户的名称和业务词簇进行独立投票，最终综合所有树的意见，输出商户属于“无证经营”的数学概率。
@@ -475,14 +467,8 @@ if start_btn:
             * **原理说明**：一种无监督的概率聚类模型。直接使用天眼查信用分会带来线性误差。GMM 自动将全网信用分拟合为两个交叠的“钟形曲线”：一个代表“高分正常群体”，一个代表“低分高危群体”。输入一个分数后，GMM 会通过贝叶斯定理计算该分数“属于高危分布群体”的真实条件概率。
             * **底层公式**：数据 $x$ 的总体概率密度为 $K$ 个高斯分布的加权和：
               $$p(x) = \sum_{k=1}^{K} \pi_k \mathcal{N}(x | \mu_k, \Sigma_k)$$
-              
-            **4. 动态概率放大器 (自适应归一化)**
-            * **原理说明**：系统设计了自适应放大器：动态寻获当前大盘的最大风险值 $P_{max}$，并按比例将概率张量整体拉伸，使极高风险群体逼近 95% 以上，且绝对不改变商户之间的相对排名先后。
-            * **底层公式**：
-              $$P_{scaled} = P_{original} \times \left( \frac{0.95}{P_{max}} \right) \quad (\text{当 } P_{max} < 0.92 \text{ 时触发})$$
             """)
 
-        # --- 打击名单 ---
         st.subheader("🚨 重点名单 TOP 20（按风险度排序）")
         display_cols = ['公司名称', '统一社会信用代码', '无证户综合概率(%)', '判定依据', '风险等级', '监管建议', '法定代表人']
         
@@ -500,9 +486,6 @@ if start_btn:
             target_pool[display_cols].to_excel(writer, index=False)
         st.download_button("📥 导出全部名单", buffer, "精准排查名单.xlsx", "application/vnd.ms-excel")
 
-        # ==============================================================
-        # 🔴 双维度 分词概率 TOP 10 榜单 (真实测算单一特征高危概率)
-        # ==============================================================
         st.divider()
         st.subheader("🏆 核心分词概率 TOP 10 榜单 ")
         st.caption("以下榜单展示的是：当一个企业的名字或范围中**仅仅命中该词**时，模型给出的独立概率。")
@@ -517,7 +500,9 @@ if start_btn:
                 for i, word in enumerate(name_features):
                     if importances_n[i] > 0.001:  
                         vec = vec_name.transform([word])
-                        prob = model_name.predict_proba(vec)[0, 1] * scale_factor * 100
+                        raw_prob = model_name.predict_proba(vec)[0, 1] 
+                        # 使用同样的非线性平滑进行评估
+                        prob = np.sqrt(raw_prob) * scale_factor * 100
                         prob = min(prob, 99.0) 
                         word_data_n.append({'核心特征词': word, '命中该词的违规概率': prob})
                 
@@ -538,7 +523,8 @@ if start_btn:
                 for i, word in enumerate(scope_features):
                     if importances_s[i] > 0.001:
                         vec = vec_scope.transform([word])
-                        prob = model_scope.predict_proba(vec)[0, 1] * scale_factor * 100
+                        raw_prob = model_scope.predict_proba(vec)[0, 1] 
+                        prob = np.sqrt(raw_prob) * scale_factor * 100
                         prob = min(prob, 99.0)
                         word_data_s.append({'核心特征词': word, '命中该词的违规概率': prob})
                 
