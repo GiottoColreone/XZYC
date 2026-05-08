@@ -333,11 +333,7 @@ if start_btn:
             veto_mask = prob_scope < 0.15
             prob_name[veto_mask] = prob_name[veto_mask] * 0.1
             
-            # =========================================================
-            # 🔴【全新核心优化：非线性开方平滑算法】
-            # =========================================================
-            # 利用平滑开方技术，将原本被随机森林压制的极低概率非线性拉伸
-            # 彻底解决大盘极不平衡导致的中高层梯队断层问题
+            # 非线性平滑算法
             prob_name_smooth = np.sqrt(prob_name)
             prob_scope_smooth = np.sqrt(prob_scope)
             
@@ -348,7 +344,6 @@ if start_btn:
             
             if max_p > 0 and max_p < 0.96:
                 scale_factor = 0.96 / max_p
-                # 同步放大独立组件，确保归因展示金额逻辑一致
                 prob_name_smooth *= scale_factor
                 prob_scope_smooth *= scale_factor
                 prob_credit_smooth = prob_credit * scale_factor
@@ -359,7 +354,6 @@ if start_btn:
             else:
                 prob_credit_smooth = prob_credit
                 
-            # 将平滑处理后的概率覆盖原变量，接入解释器
             prob_name = prob_name_smooth
             prob_scope = prob_scope_smooth
             prob_credit = prob_credit_smooth
@@ -405,11 +399,15 @@ if start_btn:
         target_pool['判定依据'] = explanations
         log_to_terminal("[EXPLAINER] 多维特征组合溯源解析完成，内容已封装。")
 
+        # ==============================================================
+        # 🔴【核心修改】：风险评级门槛全面更新
+        # ==============================================================
         def assign_risk(p):
-            if p >= 80: return '极高风险', '🚨 立即排查'
-            elif p >= 60: return '高风险', '⚠️ 重点监控'
-            elif p >= 35: return '中风险', '👀 定期关注'
+            if p >= 85: return '极高风险', '🚨 立即排查'
+            elif p >= 50: return '高风险', '⚠️ 重点监控'
+            elif p >= 20: return '中风险', '👀 定期关注'
             return '低风险', '✅ 常规监管'
+        
         target_pool[['风险等级', '监管建议']] = target_pool.apply(lambda r: pd.Series(assign_risk(r['无证户综合概率(%)'])), axis=1)
         target_pool = target_pool.sort_values('无证户综合概率(%)', ascending=False)
         
@@ -421,9 +419,12 @@ if start_btn:
         m1, m2, m3, m4 = st.columns(4)
         total = len(target_pool)
         
-        m1.metric("极高风险数量 (80%-100%)", f"{len(target_pool[target_pool['风险等级']=='极高风险'])} 家", f"占盲区底册 {len(target_pool[target_pool['风险等级']=='极高风险'])/total*100:.2f}%" if total >0 else "0%")
-        m2.metric("高风险数量 (60%-79%)", f"{len(target_pool[target_pool['风险等级']=='高风险'])} 家", f"占盲区底册 {len(target_pool[target_pool['风险等级']=='高风险'])/total*100:.2f}%" if total >0 else "0%")
-        m3.metric("中风险数量 (35%-59%)", f"{len(target_pool[target_pool['风险等级']=='中风险'])} 家", f"占盲区底册 {len(target_pool[target_pool['风险等级']=='中风险'])/total*100:.2f}%" if total >0 else "0%")
+        # ==============================================================
+        # 🔴【核心修改】：大屏面板文字同步更新
+        # ==============================================================
+        m1.metric("极高风险数量 (85%-100%)", f"{len(target_pool[target_pool['风险等级']=='极高风险'])} 家", f"占盲区底册 {len(target_pool[target_pool['风险等级']=='极高风险'])/total*100:.2f}%" if total >0 else "0%")
+        m2.metric("高风险数量 (50%-84%)", f"{len(target_pool[target_pool['风险等级']=='高风险'])} 家", f"占盲区底册 {len(target_pool[target_pool['风险等级']=='高风险'])/total*100:.2f}%" if total >0 else "0%")
+        m3.metric("中风险数量 (20%-49%)", f"{len(target_pool[target_pool['风险等级']=='中风险'])} 家", f"占盲区底册 {len(target_pool[target_pool['风险等级']=='中风险'])/total*100:.2f}%" if total >0 else "0%")
         m4.metric("精准锁定总规模", f"{total} 条", f"筛查时效: 极速 ({calc_speed} 条/秒)")
 
         st.divider()
@@ -501,7 +502,6 @@ if start_btn:
                     if importances_n[i] > 0.001:  
                         vec = vec_name.transform([word])
                         raw_prob = model_name.predict_proba(vec)[0, 1] 
-                        # 使用同样的非线性平滑进行评估
                         prob = np.sqrt(raw_prob) * scale_factor * 100
                         prob = min(prob, 99.0) 
                         word_data_n.append({'核心特征词': word, '命中该词的违规概率': prob})
